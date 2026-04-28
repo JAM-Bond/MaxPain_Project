@@ -1,0 +1,1213 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2820
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica-Bold;\f1\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\margl1440\margr1440\vieww12000\viewh15840\viewkind0
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\qc\pardirnatural\partightenfactor0
+
+\f0\b\fs36 \cf0 MaxPain Project \'97 Formal Trading Plan\
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\qc\pardirnatural\partightenfactor0
+
+\f1\b0\fs24 \cf0 Version 1.7 \'b7 2026-04-25\
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
+\cf0 \
+
+\f0\b\fs28 Overview\
+
+\f1\b0\fs24 This document is the formal, pre-registered trading plan for the MaxPain system. Its purpose is to consolidate in one place the structures, signals, entry and exit rules, and position-sizing discipline that have survived backtest validation, so that day-to-day trading decisions can be made against a written standard rather than in the moment. It is deliberately conservative: rules are committed here \i before\i0  they are used on live capital, and the paper-test window through approximately 2026-08-19 is binding regardless of how compelling any result looks in isolation. The plan is living \'97 findings that earn their keep get promoted in, findings that fail get moved to the caveats section, and every change is recorded in the revision log so the reasoning behind the current book is always auditable.\
+\
+The name MaxPain comes from the max-pain options theory: for any monthly expiration, the "max pain" strike is the one at which the largest dollar sum of in-the-money option value resides across calls and puts combined. The original hypothesis behind this system is that dealer delta-hedging against concentrated open interest near that strike creates a gravitational force that pulls the underlying toward max pain at expiration. Thirteen years of ORATS history tested at T-5 entry show this gravity is NOT causally present on average \'97 the underlying does not move toward max pain more than secular drift predicts. What remains tradeable is a distributional coincidence: certain names close within a narrow band of max pain far more often than others, and that signature is usable as a strike-selection anchor in specific structures (most notably the signal-filtered bull_put_mp variant).\
+\
+
+\f0\b\fs28 Universe: 150 Candidate Symbols\
+
+\f1\b0\fs24 The trading plan operates on a pre-registered, frozen universe of 150 symbols. The list was selected on 2026-04-23 and committed to data/profile/universe_v1.parquet. The list is not modified during the paper-test window; changes require explicit versioning (v1.1, v2).\
+\
+\b Why pre-register the universe\b0\
+\
+\'95  Every backtest result is contingent on the universe it was run against\
+\'95  Filtering names post-hoc to keep the ones that performed best measures hindsight, not edge\
+\'95  Freezing the list before running any strategy cell disciplines the evidence\
+\
+\b Why 150, not more or fewer\b0\
+\
+\'95  Below 100: thin coverage when double-stratified (e.g., sector x vol regime) \'97 fewer than 10 names per cell\
+\'95  Above 300: test noise grows faster than signal; dilutes the high-conviction archetype clusters\
+\'95  150 is the smallest universe that survives double-stratification with at least 10 names per cell while keeping per-symbol N at roughly 170 cycles over 13 years of history\
+\
+\b Selection gates (all must pass)\b0\
+\
+\'95  Options liquidity: average daily volume > 1,000 contracts; front-month OI > 10,000; ATM bid-ask at most 10% of mid\
+\'95  Stock liquidity: average daily dollar volume > $50M\
+\'95  Listed at least 4 years before the backtest start date (protects survivorship integrity)\
+\'95  Weekly expirations available\
+\
+\b Why archetype, not sector, drives allocation\b0\
+\
+Sector is a weak predictor of options behavior. AAPL and TSLA are both Technology and behave nothing alike. The final 150 was assembled by first clustering 3,992 history-eligible tickers on 11 behavioral features (aggregate OI and volume, contract count, weekly-expiration fraction, spot, ATM IV, IV regime range, skew, realized vol, VRP), then sampling within clusters under sector and cap constraints. Behavior groups names by how they actually trade \'97 which is what determines which structure wins on them.\
+\
+\b Final allocation (k=8 clustering)\b0\
+\
+\'95  \b Cluster 2 \'97 blue-chip premium-selling tier (60 names):\b0  SPY, QQQ, IWM, AAPL, MSFT, META, AMD, GLD, SLV, XLF, HYG and similar. High OI, deep weekly chains, moderate IV, modest VRP. Natural home of the bull_put book.\
+\'95  \b Cluster 1 \'97 workhorse mid-to-large caps (50 names):\b0  TSM, RIO, TJX, NEE, DUK, DHR, TMO, CARR, SPG and similar.\
+\'95  \b Cluster 0 \'97 troubled cyclicals and foreign ADRs (25 names):\b0  STLA, ITUB, SAN, CS, AR and similar. Higher IV, higher realized vol.\
+\'95  \b Cluster 4 \'97 vol-toys and busted-IPO / meme candidates (15 names):\b0  VIX, VXX, NIO, RIVN, LCID, HOOD, SNAP, TLRY and similar. Reserved for long-vol structure testing, not for premium selling.\
+\
+\b Clusters deliberately excluded\b0\
+\
+\'95  Cluster 3 (niche / sparse-chain ETFs) \'97 positive VRP but mostly illiquid\
+\'95  Cluster 5 (bankruptcies / near-bankruptcies), Cluster 6 (penny / micro-cap speculative), Cluster 7 (3-name reverse-skew anomaly, suspected data quirk) \'97 untradeable\
+\
+\b Explicit exclusions within the 150\b0\
+\
+\'95  Biotech names with binary FDA catalysts\
+\'95  Perpetual M&A targets (spread pricing distorted by deal-spread dynamics)\
+\'95  Names with multiple earnings-whipsaw cycles in the backtest window\
+\
+\b Known metadata caveats\b0\
+\
+\'95  A small number of tickers (BBT, ABX, K, STI, FCAU, CS, TWTR, YHOO, X, JCP, CTL) have been reassigned or delisted during the 13-year window. The ORATS historical data correctly reflects the historical owner during the trading window; only the current sector/cap label is stale.\
+\'95  Mid-cap bucket is under-represented (~15 names versus a target of ~60). Top-OI ranking biases toward mega/large. Re-weighted allocation is v2 scope.\
+\
+\b How the universe flows into this plan\b0\
+\
+Each structure in this document names its own cohort from inside the 150. A name not on the universe list does not appear in the plan. New candidates become universe v1.1 with a dated log entry, and any backtest results on the extended set are reported separately from the v1 baseline.\
+\
+
+\f0\b\fs28 The Pinner Cohort\
+
+\f1\b0\fs24 Within the 150-symbol universe, the subset of names that actually pin reliably near max pain is smaller. The MP-anchored structures in this plan (most notably bull_put_mp and the forward-test bear_call_mp variants) only apply to this subset; generic 30-delta verticals and the Window A bull_put apply to the broader universe.\
+\
+\b How pinning was measured\b0\
+\
+\'95  Primary metric: median |close - MP| / close across all 13 years of monthly OpEx cycles (continuous, scale-free)\
+\'95  Secondary metric: fraction of cycles where close lands within 1% of max pain (binary)\
+\'95  Max pain computed at T-1 (Thursday EOD before OpEx Friday) from that day's chain open interest\
+\'95  Scan covered 19,400 cycles across all 150 tickers \'97 script at scripts/backtest/pin_reliability_scan.py, results at data/profile/pin_reliability_per_cycle.parquet\
+\
+\b Four-tier cohort that emerged\b0\
+\
+\'95  \b Tier 1 \'97 credit and bond ETFs (4 names):\b0  BKLN, HYG, JNK, TLT. Median 1.0-1.5% off MP, 37-52% of cycles within 1%. The tightest pinners in the universe.\
+\'95  \b Tier 2 \'97 major equity indices (5 names):\b0  SPX, SPY, DIA, QQQ, IWM. Median 1.6-2.4% off MP, 21-31% within 1%.\
+\'95  \b Tier 3 \'97 sector ETFs and dividend stalwarts (10 names):\b0  XLU, XLV, IYR, VNQ, EFA, GLD, VZ, KO, PG, WMT. Median 2.0-2.6% off MP, 23-28% within 1%.\
+\'95  \b Tier 4 \'97 excluded from MP-anchored strategies:\b0  vol-toys and momentum names (LCID, ENPH, TIGR, CAR, RIG, HOOD, TLRY, VXX, MU, MP, SBSW). Median 9-20% off MP \'97 the mechanic has no meaningful gravity on them. Note: "MP" here is the ticker (Mountain Pass), not the max-pain abbreviation used elsewhere in this document.\
+\
+\b Non-obvious finding\b0\
+\
+The tightest pinners are credit/bond ETFs, not the equity indices most often associated with max pain in popular discussion. BKLN pinning within 1% of MP more than half the time is a remarkably strong distributional effect \'97 but Phase 2 testing showed the tightest pinners are also the \i least\i0  exploitable because their options are too thin to trade at the strikes required.\
+\
+\b Caveat\b0\
+\
+The statistical pin is real; a \i causal\i0  gravitational effect was not demonstrated at T-5 entry (see Overview). Pinner-cohort status is a useful universe-characterization flag, not a standalone trading signal.\
+\
+
+\f0\b\fs28 Primary Trading Windows\
+
+\f1\b0\fs24 This plan operates in two non-overlapping trading windows. Trades outside these windows are not part of the plan.\
+\
+\b Window A \'97 45-DTE Managed.\b0  Enter at ~45 days to expiration. Exit on first trigger of either 21 DTE or 50% of max profit. Purpose: harvest the core of the theta curve at realistic delta and wing widths, with management rules that cap both sides of the tail. Candidate structures: bull_put and bear_call verticals, iron condor, short strangle, and inverted_fly (long-vol hedge, opposite regime). Rolling is permitted under defined triggers \'97 see Management.\
+\
+\b Window B \'97 Near-OpEx Theta Harvest.\b0  Enter 5 trading days before OpEx Friday (T-5). Exit timing is structure-specific: the only validated spec in this plan is bull_put_mp held to expiration. Purpose: collect the final theta acceleration on OpEx-anchored option combinations. Candidate structures: ATM or near-ATM iron flies, iron condors, short strangles, and MP-anchored verticals where entry signals permit \'97 each with its own exit spec in its section. \i Caveat:\i0  a T-3 exit rule was tested and hurts 7 of 8 premium-seller structures, because the theta payoff concentrates in the final 2 trading days. Do not apply a blanket D-3 exit. Forward-test results on individual Window B structures are the binding evidence; iron fly, iron condor, and strangle Window B specs are pending.\
+\
+\b Why two windows, not one.\b0  The 45-DTE and near-OpEx trades are structurally different P&L mechanics even when they share an underlying or a structure. Paper-track results are reported per window so a win or loss in one window does not contaminate inference about the other.\
+\
+\b Paper-test window.\b0  Both windows operate under paper-only discipline through approximately 2026-08-19. No live capital is committed in either window before that date, regardless of backtest or paper-track results.\
+\
+\b Paper-test falsification and promotion criteria.\b0  A paper-test window is only meaningful if it can fail the plan. The binding review questions at the 2026-08-19 gate:\
+\
+\'95  \b Bull_put.\b0  Did the shortlist accumulate at least 10 closed monthly OpEx cycles? If fewer, extend paper-test; do not promote on thin evidence. If 10+, is aggregate mean P&L per cycle above zero at the friction actually incurred (not the backtest friction)? Below zero on 10+ cycles is a falsification and forces a rewrite of the bull_put section, not an extension.\
+\'95  \b Bear_call.\b0  Did the H1 filter (SPY < 200dma AND SPY 252-day IV rank > 0.5) fire and produce at least 1 closed cycle? If it never fired during the paper window, bear_call remains backtest-only \'97 do not promote to live on zero live evidence, regardless of how much time passed. If it fired 5+ times, is mean P&L per cycle positive? If yes, candidate for live at reduced size. If no, bear_call H1 rewrite required.\
+\'95  \b Rolling rule (bull_put_mp T2_mtm down-and-out).\b0  Did the roll trigger fire at least 3 times? On those triggered cycles, did the rolled combined P&L beat the accept-loss baseline of roughly \'96$0.26? Below baseline is a falsification.\
+\'95  \b Live-capital breach.\b0  Did any live capital enter via either window during the paper-test period? If yes, audit what slipped through and tighten the discipline before proceeding.\
+\
+Rolling the paper-test forward without rewriting the plan is a recognized failure mode \'97 if the evidence is pointing at a falsification, the correct move is to rewrite the relevant section, not to buy more time.\
+\
+
+\f0\b\fs28 What Works (Validated)\
+
+\f1\b0\fs24 \
+\
+
+\f0\b\fs28 Signal Definitions\
+
+\f1\b0\fs24 All signals referenced in the entry and regime sections are computed from SPY daily data (unless noted otherwise), sourced from the ORATS historical chain plus spot close. Definitions are listed here so rules can be implemented unambiguously by the user or any future tool.\
+\
+\b SPY VRP (volatility risk premium)\b0\
+\
+\'95  VRP = ATM IV30 \'96 RV20\
+\'95  ATM IV30 = 30-DTE at-the-money implied volatility, interpolated from SPY chain to exactly 30 days\
+\'95  RV20 = 20-trading-day realized volatility of SPY close-to-close log returns, annualized (sqrt(252) scale)\
+\'95  "VRP positive" = VRP > 0 (implied is pricing a cushion over recent realized)\
+\'95  "VRP negative" = VRP < 0 (realized already exceeds implied)\
+\
+\b SPY term structure spread\b0\
+\
+\'95  Term spread = front 30-DTE ATM IV \'96 back 75-DTE ATM IV\
+\'95  "Contango" = term spread < 0 (back > front, the normal condition)\
+\'95  "Inverted" = term spread > 0 (front > back, vol regime stress)\
+\'95  "Near-inverted" = term spread within a small positive band (used only where the signal-study memo invokes it)\
+\
+\b SPY 252-day IV rank\b0\
+\
+\'95  IV rank = (current ATM IV30 \'96 252d min ATM IV30) / (252d max ATM IV30 \'96 252d min ATM IV30)\
+\'95  Range [0, 1]. Recomputed daily on a rolling 252-trading-day window\
+\'95  Thresholds used in this plan: 0.5 (bear_call H1 gate), 0.7 (bull_put soft-downsize), 0.9 (high-conviction signal study comparison)\
+\
+\b SPY 200-day and 50-day moving averages\b0\
+\
+\'95  Simple moving average of SPY daily close over 200 and 50 trading days\
+\'95  "SPY < 200dma" evaluated at the entry day\'92s close\
+\'95  "SPY > +X% over 200dma" = (close \'96 200dma) / 200dma > X / 100\
+\
+\b Max pain strike\b0\
+\
+\'95  MP = argmin over strikes K of \uc0\u8721  over strikes Ks of cOI(Ks) \'b7 max(0, K \'96 Ks) + pOI(Ks) \'b7 max(0, Ks \'96 K)\
+\'95  Uses open interest at the chain snapshot referenced by the window: T-5 for Window B entry decisions, T-1 for the pin-reliability scan\
+\
+\b Extension above MP\b0\
+\
+\'95  Extension = (spot \'96 MP) / MP\
+\'95  Positive = spot above MP; negative = spot below MP\
+\'95  Used for aggressive bear_call_mp analysis (Phase 2h)\
+\
+
+\f0\b\fs28 Structures & Entry Rules\
+
+\f0\b\fs26 Bull Put Vertical\
+
+\f1\b0\fs24 A bull put vertical is a defined-risk credit spread: short put at a higher strike, long put at a lower strike on the same expiration. It profits if the underlying stays above the short strike at exit.\
+\
+\b Signals that favor a bull put entry\b0\
+\
+\'95  SPY term structure in contango \'97 front-month ATM IV < back-month ATM IV\
+\'95  SPY VRP positive \'97 IV30 - RV20 > 0 (implied is pricing a premium over recent realized)\
+\'95  Both conditions required jointly \'97 approximately 57% of historical T-5 entry days qualify (742 of 1,307 cycles in the Phase 2f test)\
+\'95  When either fails, skip the entry; the lift disappears\
+\'95  Do not use the inverse rule "skip inverted days." The validated rule is specifically \i require contango AND VRP>0\i0\
+\
+\b Generally optimal construction\b0\
+\
+\'95  \b Window A (45-DTE managed):\b0  30-delta short put, long put one wing width lower (~0.5% of spot, floor $2). Exit on first trigger of 50% of max profit or 21 DTE.\
+\'95  \b Window B (near-OpEx):\b0  T-5 entry. Short put at the strike nearest max-pain; long put one strike lower. Requires spot at or above MP at entry. Held to expiration \'97 no early exit.\
+\'95  Size by dollar risk, not contract count. One SPX contract is roughly 100x one XLU contract in dollar terms.\
+\'95  Enter at mid-or-better; a half-spread of slippage wipes out most of the edge.\
+\
+\b Symbols that respond well (personality)\b0\
+\
+\'95  Blue-chip premium-selling tier \'97 high aggregate OI, deep weekly-expiration chains, moderate implied vol (~17-34%), modest VRP\
+\'95  Liquidity is non-negotiable \'97 OI at least 10K on relevant strikes, bid-ask at most 10% of mid on both legs\
+\'95  Directional profile: upward drift or range-bound \'97 the implicit bet is "short side near-OTM rarely tested"\
+\'95  No binary earnings inside the DTE window \'97 earnings moves are bimodal and break the carry thesis\
+\'95  Validated shortlist at realistic friction, managed exit: MSFT, TJX, WMT, QQQ, CNC, RIO, SPY, DAL, INTC, WFC, XLU, HYG (73-88% win, +$0.01 to +$0.13 mean, 71-92% year consistency over 13 years)\
+\'95  Highest-conviction four: MSFT, TJX, WMT, QQQ \'97 all above 85% year consistency\
+\
+\b Symbols that do NOT respond well\b0\
+\
+\'95  Commodity and macro-flow-driven names \'97 metals miners (NEM, GDX, FCX), energy cyclicals; dealer gamma is overwhelmed by macro flow\
+\'95  Binary-event names \'97 biotech baskets (XBI), single-name pharma with FDA calendars, active M&A targets\
+\'95  Vol-toys and leveraged/inverse products \'97 VXX, TLRY, LCID, RIVN, HOOD, ARKK, TEVA, EWZ\
+\'95  Rate/duration-sensitive ETFs \'97 TLT is macro-directional, not pinning-driven\
+\'95  Negative-VRP names where realized vol persistently exceeds implied \'97 no cushion to harvest\
+\
+\b Macro (SPX as proxy)\b0\
+\
+\'95  \b Favorable:\b0  SPX above 200dma, term structure in contango, VRP positive, VIX moderate, no active geopolitical shock\
+\'95  \b Unfavorable:\b0  SPX below 200dma, term inverted, VRP negative, VIX elevated, confirmed bear trend\
+\'95  Regime sensitivity is total. In backtested bear windows (COVID 2020, 2022 inflation, Dec 2018, Aug 2015), bull_put mean flips from modest positive to meaningfully negative (-$0.18 to -$0.40 per cycle). The structure\'92s edge is at least partly a bull-market artifact of a 14-year regime-dominant backtest.\
+\'95  Treat the SPX regime check as a gate. Running bull_put heavy into a confirmed bear regime is quantifiably expensive.\
+\
+\b Rolling (validated)\b0\
+\
+\'95  \b Trigger:\b0  MTM loss at or beyond 1x entry credit\
+\'95  \b Style:\b0  down-and-out \'97 close the losing position, open a fresh bull_put at the new max-pain strike on the next monthly OpEx\
+\'95  \b Net-credit requirement:\b0  the roll must open for a credit; otherwise accept the loss\
+\'95  \b Cap:\b0  one roll per original cycle; serial rolling is untested\
+\'95  \b Per-name selectivity:\b0  SPX, WMT, DIA, VNQ, QQQ, TLT, SPY benefit from rolling. XLU, IYR, XLV, KO do not \'97 hold to expiry on these names\
+\'95  Do not gate the roll decision by signal filter. The contango+VRP>0 rule is an entry signal; at trigger day it destroys edge\
+\'95  Do not use spot-based stops \'97 short puts mean-revert enough that intraweek breach is not a reliable exit trigger\
+\
+\b Expected outcomes (at realistic retail friction)\b0\
+\
+\'95  Win rate: approximately 70-80% on curated names; 87% on the signal-filtered MP-anchored Window B variant\
+\'95  Mean P&L: +$0.05 to +$0.13 per cycle on the 12-name shortlist; +$0.019 per cycle on signal-filtered Window B\
+\'95  Tail: worst cohort cycle roughly -$6 per contract held to expiry; rolling widens the 1st-percentile drawdown to approximately -$2.50 while improving the mean\
+\'95  Expect long stretches of small consistent winners punctuated by occasional larger losers. Size for the tail, not the mean.\
+\
+\b Pending investigations (not part of validated plan)\b0\
+\
+\'95  \b RSI-14 bullish divergence as entry confirmation.\b0  Tested 2026-04-24: SPY at 20-day low with RSI-14 NOT at 20-day low precedes forward 25-day return of +4.71% vs +1.24% baseline (~4x lift, N=109). Asymmetric finding \'97 bullish divergence works as a BUY signal from oversold conditions; bearish divergence does NOT work as a sell signal. Candidate entry confirmation for bull_put on pullbacks; not yet promoted because the lift is documented on forward SPY return, not on bull_put cycle P&L directly. Needs a dedicated cycle-level test before becoming a validated entry gate.\
+\'95  \b Full Mag 7 breadth divergence.\b0  Mag 4 (AAPL/MSFT/META/TSLA) divergence vs SPY showed a modest negative effect on thin sample (fwd 25d +0.79% vs +1.41% baseline, N=109). Cannot confirm or rule out the broader published finding until AMZN/GOOGL/NVDA ORATS data is ingested.\
+\
+
+\f0\b\fs26 Bear Call Vertical\
+
+\f1\b0\fs24 A bear call vertical is a defined-risk credit spread: short call at a lower strike, long call at a higher strike on the same expiration. It profits if the underlying stays below the short strike at exit. Bear call is the regime mirror of bull put: its edge lives almost entirely in confirmed bear regimes. In bull-regime-dominated data, cohort-wide bear_call is not a standalone trade.\
+\
+\b Signals that favor a bear call entry\b0\
+\
+\'95  \b Primary (validated H1 filter, 2026-04-24):\b0  SPY below 200-day moving average AND SPY 252-day IV rank > 0.5. Lifts aggressive bear_call_mp from -$0.087 baseline to +$0.092/cycle (40% win rate, N=102 over 13 years). This is the only validated bear_call entry gate.\
+\'95  \b Surprising negative finding:\b0  term structure inversion alone is DIS-informative for bear_call. Adding "term inverted" to the regime filter HURTS performance (-$0.152 in the SPY<200dma+term-inv cohort). The symmetric-opposite-of-bull_put hypothesis is falsified.\
+\'95  In bull regimes (SPY above 200dma), no validated signal makes standalone bear_call profitable. Default posture is "do not enter."\
+\'95  Entry conditions based on spot-extension-above-MP (spot >5% above MP, mean-reverter cohort filter) have been tested in Phase 2h and do NOT confer edge on their own.\
+\'95  The H1 filter fires on roughly 4% of historical trading days. Bear_call is an occasional trade, not a persistent book.\
+\
+\b Generally optimal construction\b0\
+\
+\'95  \b Window A (45-DTE managed):\b0  30-delta short call, long call one wing width higher (~0.5% of spot, floor $2). Exit on first trigger of 50% of max profit or 21 DTE.\
+\'95  \b Window B (near-OpEx, T-5 entry, held to expiry):\b0  30-delta short call, long call one strike higher. Marginal to negative in bull regimes; flips positive in bear windows.\
+\'95  \b MP-anchoring does not lift bear_call.\b0  Tested directly in Phase 2c: short call at strike nearest MP versus short call at 30-delta produced no edge lift. The asymmetric finding \'97 MP-anchoring helps puts, not calls \'97 is load-bearing.\
+\'95  \b Aggressive ITM MP-anchored variant (spot above MP entry) does not work standalone.\b0  Tested in Phase 2h across 2,686 cycles at four extension thresholds (0-2%, 2-5%, 5-10%, >=10%): every bucket negative, cohort mean -$0.087/cycle, win rate 21.7%. Do NOT deploy outside a confirmed bear regime gate.\
+\'95  Size by dollar risk; 1-wide wings on high-priced underlyings are particularly slippage-sensitive.\
+\
+\b Symbols that respond well (personality)\b0\
+\
+\'95  \b In backtested bear regimes (any variant):\b0  broad equity indices (SPX, SPY, QQQ, DIA, IWM) and Phase 1 pinners. Regime-contingent, not personality-driven.\
+\'95  \b Cohort-level, full 13-year sample (aggressive ITM variant):\b0  only WMT shows positive mean (+$0.061, N=96, 32% win). No other name in the 32-ticker cohort clears a meaningful positive edge.\
+\'95  \b Mean-reverting names\b0  (CNC, TJX, NEE, T, GILD, PFE, MSFT, VZ, RIO, K) do NOT confer edge to bear_call. Tested directly in Phase 2h: mean-reverter cohort mean -$0.120 versus pinner cohort -$0.063. The statistical mean-reversion signature does not translate to bear_call profitability on OpEx-window trades.\
+\
+\b Symbols that do NOT respond well\b0\
+\
+\'95  \b In bull regimes: every cohort.\b0  Standalone bear_call is net-negative on the full universe at realistic friction.\
+\'95  \b Worst cohort-wide (aggressive variant):\b0  NEE (-$0.375), SPX (-$0.298), CNC (-$0.278). These lose heavily even when entered with spot extended above MP.\
+\'95  Trending / momentum names (variance ratio > 1) \'97 CAR, HAL, SPG, VALE, GE, X, ITUB, ENPH, NIO. Trend through resistance rather than mean-revert.\
+\'95  Same vol-toy and binary-event exclusions as bull_put (VXX, TLRY, LCID, RIVN, biotech baskets, active M&A targets).\
+\'95  Rate/duration-sensitive ETFs (TLT) \'97 macro-directional.\
+\
+\b Macro (SPX as proxy)\b0\
+\
+\'95  \b Favorable (backtested):\b0  SPX below 200dma, term inverted, VRP negative. In bear windows bear_call flips from negative baseline to meaningfully positive: 45-DTE variant +$0.07 to +$0.24 per cycle; aggressive ITM variant +$0.28 to +$0.39 per cycle in 2022 bear and Dec 2018 windows.\
+\'95  \b Unfavorable:\b0  SPX above 200dma with contango and positive VRP. Default posture is zero bear_call exposure.\
+\'95  \b Regime sensitivity dominates.\b0  The regime effect is larger than any structural variation (ITM vs OTM, MP vs 30-delta, per-ticker selection). Choose the regime first, then the structure.\
+\'95  The aggressive ITM variant has larger per-cycle dollars at stake than OTM variants \'97 same regime sensitivity, bigger wins when the regime is right, bigger losses when it isn't.\
+\
+\b Rolling (tested \'97 FALSIFIED, H3 2026-04-24)\b0\
+\
+\'95  Bear_call rolling was tested symmetric to Phase 2g. Unconditional roll on 125 triggered cycles produced combined mean -$0.946 vs accept-loss baseline -$0.855. Rolling compounds losses.\
+\'95  Only 29.6% of rolls improved the outcome. The other 70.4% made it worse.\
+\'95  Regime-gated rolling (SPY < 200dma at entry) gave a tiny +$0.018 lift on N=21 \'97 well within noise.\
+\'95  Even within the positive H1 filter cohort, adding rolling slightly hurts (+$0.092 no-roll vs +$0.087 with roll).\
+\'95  \b Do not roll bear_call positions.\b0  Hold to expiry per Window A / Window B rules.\
+\'95  Mechanism for asymmetry with bull_put: bull_put down-and-out rolls into a new MP below spot (fresh cushion). Bear_call up-and-out rolls into a new MP with spot > MP again \'97 in a persistent bull, each roll is another bet against the same trend. Rolling against a sustained trend compounds losses.\
+\
+\b Expected outcomes\b0\
+\
+\'95  \b Under the validated H1 filter (SPY<200dma + SPY IVR>0.5):\b0  +$0.092/cycle, 40.2% win, N=102 across 13 years. The primary expected book for bear_call.\
+\'95  \b 45-DTE managed, bull regime (backtested):\b0  negative, roughly -$0.04 to -$0.09 per cycle at realistic friction. Default exclude.\
+\'95  \b 45-DTE managed, bear regime (backtested):\b0  positive, roughly +$0.10 to +$0.21 per cycle, 43-52% win rate on broad indices.\
+\'95  \b Near-OpEx T-5 held to expiry, 30-delta (Phase 2c):\b0  marginal to negative baseline; no MP-anchoring lift.\
+\'95  \b Aggressive ITM MP-anchored variant, unfiltered (Phase 2h):\b0  -$0.087 per cycle, 21.7% win rate across 2,686 cycles. Do not run unfiltered.\
+\'95  \b Aggressive ITM in specific backtested crash windows:\b0  +$0.28 to +$0.39 per cycle on limited-N samples (2022 N=102, Dec 2018 N=33). Directional, not point-estimate.\
+\
+\b Completed tests (2026-04-24)\b0\
+\
+\'95  \b H1 signal filter: COMPLETED.\b0  Positive finding \'97 "SPY < 200dma AND SPY 252-day IV rank > 0.5" lifts mean to +$0.092/cycle, 40% win (N=102). Term inversion alone is DIS-informative. Filter is the primary entry gate above.\
+\'95  \b H3 rolling: COMPLETED.\b0  Falsified \'97 rolling compounds losses. Do not roll bear_call. Documented above.\
+\
+\b Still pending (not part of the validated plan)\b0\
+\
+\'95  \b Regime detector (Phase 2i):\b0  broader macro-indicator gate (VIX level, breadth, credit spreads, yield curve) that could refine bear_call deployment beyond the H1 filter. Not yet tested. Low priority given H1 is already validated.\
+\'95  \b Live forward-test of H1 filter:\b0  needs at least 10 cycle closures under the filter before upgrading from "validated backtest" to "validated in live/paper." The H1 filter fires ~4% of days, so this will accumulate slowly.\
+\
+
+\f0\b\fs26 Inverted Fly\
+
+\f1\b0\fs24 An inverted fly is a four-leg defined-risk long-volatility structure: long 1 ATM call + long 1 ATM put (forming an ATM straddle body) + short 1 OTM call + short 1 OTM put (the short wings). All four legs on the same expiration and underlying. Net debit paid at entry. The position profits when the underlying moves past either short strike by exit. Maximum loss = the debit paid, realized if the underlying pins at or near spot and all four legs expire at their starting-strike intrinsic. Maximum profit = (wing width \'d7 100) \'96 entry debit, realized if the underlying closes at or beyond either wing strike. \i Spot\i0  throughout this section means the current underlying price at entry. All tested results use \i slip=0.25\i0  (each leg fills 0.25 \'d7 bid-ask-half-spread away from the midpoint) as the realistic-retail friction assumption.\
+\
+Unlike the three short-premium structures above, inverted fly is a long-volatility bet. It pays when realized moves exceed the implied vol priced at entry. Structurally it is the regime counterpart to bull_put and bear_call \'97 running inverted_fly alongside a bull_put on the same name produces a natural regime hedge: when the premium-seller wings test, the inverted fly pays. This structure requires wide wings: narrower than 5% of spot produces a degenerate long-ATM-with-decoration that decays to zero. Validated wing width is 10% of spot.\
+\
+\b Signals that favor entry (TESTED \'97 VALIDATED)\b0\
+\
+\'95  \b SPY term_spread > 0 (inverted term structure).\b0  Primary validated gate (Phase A IF batch, 2026-04-24). Lifts universe-wide mean from +$0.191/cycle (all cycles) to +$0.639/cycle on term-inverted days only. Win rate lifts from 60.2% to 66.6%. Fires on ~20% of historical trading days.\
+\'95  \b Joint stack: term inverted AND SPY 252-day IV rank > 0.5.\b0  Mean +$0.697/cycle (N=1,975, 66.9% win). Highest-conviction cohort.\
+\'95  \b Joint stack: term inverted AND SPY VRP < 0.\b0  Mean +$0.656/cycle (N=1,613, 67.5% win). Alternate joint-stress gate.\
+\'95  \b Do NOT enter on contango + VRP>0 days.\b0  That is the Phase 2f bull_put entry signal. Applied to inverted_fly it ACTIVELY HURTS (filter lift \'96$0.086/cycle). The two structures are entry-gate opposites. When the bull_put book is deploying, the inverted_fly book should be skipping.\
+\'95  \b Do NOT use IV rank > 0.7 alone.\b0  Tested and essentially zero lift (N=937, mean +$0.185, lift \'96$0.006). The market has already priced the move into the ATM straddle; the body is too expensive. IV rank > 0.5 is the usable threshold \'97 less extreme, catches the sweet spot.\
+\
+\b Trade mechanics \'97 tested entry/exit rules\b0\
+\
+\'95  \b 45-day entry rule (VALIDATED).\b0  Enter at approximately 45 days to expiration. Long 1 ATM call + long 1 ATM put (straddle body). Short 1 OTM call at strike approximately spot \'d7 1.10. Short 1 OTM put at strike approximately spot \'d7 0.90. Wings scaled to 10% of spot on each side.\
+\'95  \b Exit rule (VALIDATED): 50% of maximum profit, else held to expiration.\b0  Close the position when unrealized gain reaches 50% of maximum profit. Otherwise hold to expiration and let the wings settle at intrinsic. \b NO 21-day time stop.\b0  Tested and it DESTROYS long-vol edge: universe-wide 50%-only +$0.191/cycle vs managed first-trigger (50%/21-DTE) \'96$0.004/cycle. The 21-DTE time stop exits before the bulk of long-vol payoffs, which concentrate in the final two weeks when the underlying actually moves.\
+\'95  \b Near-OpEx (T-5) entry FAILS (TESTED, REJECTED).\b0  Mean +$0.041/cycle, negative median, 5\'d7 weaker than 45-DTE. Additionally the term-inversion gate that LIFTS 45-DTE entry ACTIVELY HURTS at T-5 (\'96$0.190/cycle filtered). Same signal, opposite effect based on time-to-expiration. Do NOT use T-5 entry for inverted_fly.\
+\'95  \b Wing width: 10% of spot (VALIDATED).\b0  Tested at 3%, 5%, 10%, 15% of spot. 10% is the sweet spot \'97 universe-wide mean +$0.146/cycle; cluster 2 at 10% wings has genuine year-round edge (+$0.167 non-crash, +$1.30 in crashes). 15% wings match 10% on mean but go slightly NEGATIVE in Volmageddon 2018. Narrower than 5% degenerates to an ATM-straddle-with-decoration.\
+\'95  \b Sizing.\b0  By dollar debit per contract (entry cost = max loss). SPX inverted fly at 10% wings is typically $1,500\'96$3,000 debit per contract; AMD or CAR is $400\'96$900 per contract. Naive per-contract sizing overweights index names by 5\'96 10\'d7. SPX alone carries 77% of pair book dollar P&L; sizing must account for this.\
+\'95  \b Execution.\b0  Open all four legs simultaneously on a combo ticket. Legging in during inverted term structure risks paying more on later legs as IV continues rising.\
+\
+\b Symbols that respond well (TESTED)\b0\
+\
+Two distinct deployment modes emerged from Phase A/B testing and are treated separately.\
+\
+\i Pair mode\i0  \'97 inverted_fly run simultaneously with bull_put on the same name and expiration. 39 of 57 cluster-2 names are pair-positive at 45-DTE, 50%-only IF exit, slip=0.25, N>=30.\
+\
+\'95  \b SPX (anchor):\b0  pair combined +$17.10/cycle, 57% win, total +$2,480 across 145 paired cycles. Enormous dollar scale \'97 a single contract carries the book.\
+\'95  \b SPY, QQQ (index supports):\b0  SPY combined +$1.00/cycle (51% win, N=153). QQQ combined +$1.26/cycle (63% win, N=142). Highly correlated with SPX (0.73\'960.98); effectively the same trade at smaller scale. Use SPX OR (SPY + QQQ), not all three, unless sizing is enforced independently.\
+\'95  \b Cluster-2 diversifier supports (positive combined mean at N>=30):\b0  GLD +$0.71, EFA +$0.46, WMT +$0.39, NEM +$0.28, XOM +$0.28, PG +$0.24, WFC +$0.24, GE +$0.23, INTC +$0.22, BABA +$0.25.\
+\'95  \b GLD and NEM are surprise survivors.\b0  Prior pair analyses excluded commodity-flow names; at 50%-only IF exit they work. Commodity IF leg needs the longer hold to capture its edge \'97 managed-exit rules were cutting it short.\
+\
+\i Standalone mode\i0  \'97 inverted_fly alone without a bull_put partner, on high-IV names where bull_put has entry failures. All five below are walk-forward-validated (train 2013-2022, validate 2023-2026).\
+\
+\'95  \b TSLA \'97 long-term champion.\b0  Full-sample +$1.03/cycle (N=156), 74% train win, 82% validation win. 9 of 14 years positive. Highest variance across singles: 2017 \'96$3.15, 2020 +$6.41, 2022 +$5.37, 2026 YTD \'96$7.46.\
+\'95  \b AMD \'97 best risk-adjusted.\b0  Train mean \'96$0.13 flipped to validation mean +$1.65 with 95% validation win rate (N=39). Worst cycle \'96$7.27 in 139 cycles. Tight tail relative to mean.\
+\'95  \b NVDA \'97 Mag 7 (universe expansion, 2026-04-24).\b0  Full-sample +$0.505/cycle (N=294), 61.4% train win, 54.4% validation win. Tight tail (worst \'96$47 vs mean +$0.51). Term-inversion gate works cleanly (+$1.28 lift). Cleanest of the new Mag 7 additions.\
+\'95  \b CAR \'97 most consistent.\b0  10 of 14 years positive; train +$0.37, val +$0.24, 77% win rate in both halves. Slow-tempo single: 82% of cycles ride to expiration.\
+\'95  \b AMZN \'97 Mag 7, high-scale (universe expansion, 2026-04-24).\b0  Full-sample +$2.14/cycle (N=309), 57% win. Walk-forward validates: train +$2.64, val +$0.69. Dollar scale similar to SPX; debit per contract approximately $3,000\'96$5,000 at 10% wings \'97 size carefully. Term-inversion gate is MASSIVE (+$4.26 lift). Tail worst \'96$235/contract.\
+\'95  \b META \'97 thin history but strong validation.\b0  Only 9 training cycles (history begins 2021), 39 validation cycles, +$0.76 val mean with 74% win rate. Thin enough that the edge is directional, not point-estimate.\
+\'95  \b GOOGL \'97 Mag 7, high-scale (universe expansion, 2026-04-24).\b0  Full-sample +$2.26/cycle (N=233), 55% win. Walk-forward validates: train +$3.08, val +$0.66. Dollar scale similar to AMZN. \b Term-inversion gate HURTS (\'96$2.29 lift) \'97 run GOOGL WITHOUT the gate\b0 . The gate-hurt mechanism is not yet understood (thin gated sample N=49 may be a factor); pending investigation.\
+\'95  \b BABA \'97 steady.\b0  Train +$0.25, val +$0.57, 74% validation win rate. China regulatory vol keeps two-sided moves alive.\
+\
+\i Low-conviction diversifier singles\i0  (universe expansion, 2026-04-24) \'97 validated walk-forward at tight magnitudes and tight tails, suitable as small-size diversifiers but not core:\
+\
+\'95  \b SCCO (copper miner):\b0  train +$0.089, val +$0.186, 61% win, worst \'96$6.36. 2026 YTD strongest of the commodity names at +$1.49/cycle.\
+\'95  \b GOLD (gold miner):\b0  train +$0.140, val +$0.140, 63% win, worst \'96$7.10. Quiet but consistent.\
+\'95  \b CLF (steel):\b0  train +$0.030, val +$0.027, 64% win, worst \'96$1.50 (tightest tail of any new ticker). Tiny mean but near-zero worst-case.\
+\
+\b Symbols that do NOT respond well (TESTED)\b0\
+\
+\i Pair losers\i0  (cluster 2, combined mean negative at N>=30):\
+\
+\'95  \b XBI\b0  (biotech ETF): combined \'96$0.21/cycle, N=137. Binary FDA event risk hits both wings and the bull_put side asymmetrically.\
+\'95  \b TLT\b0  (long-duration Treasury ETF): combined \'96$0.36, N=147. Rate-sensitive, macro-directional \'97 neither wing behaves well.\
+\'95  \b XOP\b0  (oil & gas exploration ETF): combined \'96$0.41, N=150. Macro-flow-dominated.\
+\'95  \b IYR\b0  (real estate ETF): combined \'96$0.50, N=85 \'97 worst cluster-2 pair loser.\
+\
+\i IV-trap names\i0  \'97 high realized move frequency but negative-edge standalone inverted fly. The market prices the expected vol into the straddle debit; the structure pays back only what it paid for.\
+\
+\'95  PLTR, ENPH, MP (ticker, Mountain Pass Materials), CFLT, UBER. Move often, but no standalone IF edge at realistic friction.\
+\
+\i Vol-toys\i0  \'97 one-directional secular decline. The short put wing gets breached repeatedly; the short call wing expires worthless; the structure degenerates to a long put.\
+\
+\'95  VXX, TLRY, LCID, RIVN, HOOD, NIO, SNAP.\
+\
+\i DIA specifically.\i0  DIA standalone inverted fly at 50%-only produces negative mean (\'96$0.23/cycle, N=106) despite being marginally positive in pair mode (+$0.29/cycle, N=67). DIA is pair-only and low-conviction; do not run DIA as standalone IF.\
+\
+\b Macro (SPX as proxy)\b0\
+\
+\'95  \b Favorable (TESTED).\b0  SPY term structure inverted at entry. Elevated realized vol (VRP negative or near zero). SPX in a developing vol regime \'97 the early legs of a confirmed bear are the backtested sweet spot. Dec 2018 pair combined was +$3.63/cycle, the single best bear window in the sample.\
+\'95  \b Neutral (TESTED).\b0  Contango + VRP>0 days (the bull_put calm-regime signature). Inverted_fly baseline mean drops to +$0.105/cycle on those days \'97 still positive but the lowest-edge regime. The pair book's bull_put leg earns here while the inverted_fly leg runs near breakeven.\
+\'95  \b Unfavorable (TESTED).\b0  Volmageddon 2018 pattern \'97 single-day IV spike followed by immediate IV collapse. Pair combined \'96$1.37/cycle (N=41) in this window; worst cycle \'96$30.80. Inverted fly does not have time to capture the move before IV collapses back; meanwhile the short wings have become expensive to buy back. This is an irreducible regime weakness. Defined-risk sizing is the only defense.\
+\'95  \b All other tested bear windows positive.\b0  COVID 2020 pair combined +$0.98, 2022 bear +$1.18, Aug 2015 +$1.01, Dec 2018 +$3.63. When a crash has multi-day legs, inverted fly performs strongly.\
+\
+\b Rolling (NOT YET TESTED)\b0\
+\
+Rolling mechanics for long-vol inverted fly have no clearly-defined motivating trigger. For short-premium credit structures, rolling on MTM breach (Phase 2g bull_put) is a natural concept: close the losing trade and reopen at a refreshed strike. For a long-vol debit structure the parallel is unclear \'97 rolling on theta decay before a move arrives is a different bet than the original entry and may compound losses. \b Do NOT roll inverted_fly positions\b0  until a pre-registered test defines the trigger and compares outcomes to held-to-rule. Queued as Phase C.\
+\
+\b Expected outcomes (TESTED at 10%-of-spot wings, 45-DTE entry, 50%-only exit, slip=0.25)\b0\
+\
+\'95  \b Universe-wide baseline, all cycles:\b0  mean +$0.191/cycle, 60.2% win, median +$0.216, N=16,821.\
+\'95  \b Universe-wide, term-inverted days only:\b0  mean +$0.639/cycle, 66.6% win, N=3,303.\
+\'95  \b Universe-wide, joint term-inv AND IVR > 0.5:\b0  mean +$0.697/cycle, 66.9% win, N=1,975.\
+\'95  \b Pair book, cluster 2 combined (BP+IF):\b0  mean +$0.530/cycle, 56.3% win, median +$0.298, N=5,894. 39 of 57 names positive.\
+\'95  \b Pair core 4 (SPX/SPY/QQQ/TSLA):\b0  combined +$5.97/cycle, 58.4% win, N=481. SPX dominates dollar totals.\
+\'95  \b Pair core 4 with term-inversion IF gate:\b0  combined +$15.03/cycle, 71.6% win, N=95. Term-inversion gate lifts the pair book substantially.\
+\'95  \b Standalone singles validation (2023-2026):\b0  all 5 positive \'97 TSLA +$1.20, AMD +$1.65, CAR +$0.24, BABA +$0.57, META +$0.76 mean per cycle. AMD highest validation win rate at 95%.\
+\'95  \b Tail (per-contract, standalone, no pair):\b0  SPX worst \'96$249, best +$291; TSLA worst \'96$30, best +$19; AMD worst \'96$7.27, best +$4.65 (tightest). Defined-risk floor = entry debit per contract.\
+\'95  Payoff shape is positive-skew. Median near zero or slightly positive; mean is lifted by occasional large wins in vol-expansion regimes. Expect long stretches of flat-to-slightly-negative median P&L punctuated by regime spikes. Do not abandon the structure during those stretches \'97 that is the expected quiet-regime behavior and is the reason the pair book exists (bull_put earns here).\
+\
+\b Completed Phase C tests (2026-04-24)\b0\
+\
+\'95  \b Multi-year walk-forward of term-inversion gate:\b0  VALIDATED. Four rolling train/validate splits across 2013-2026; gate positive in every validation window. Most recent two windows (2023-2025 and 2024-2026) show the strongest lift (+$0.81 and +$0.63), signal has not degraded.\
+\'95  \b Rolling at dte_21 loss check-point (proxy):\b0  FALSIFIED. Closing at dte_21 if loss >= 50% of debit, then re-opening next monthly OpEx, produces only +$0.005/cycle cohort lift (noise). Tighter thresholds produce negative lift. See "What Doesn't Work" for the full test.\
+\'95  \b Stop-loss at dte_21 loss check-point (proxy):\b0  FALSIFIED. Full cohort lift \'96$0.005/cycle at 50%-debit threshold; near-zero at tighter thresholds. Cutting losers also crystallizes temporary losses that would have reverted. See "What Doesn't Work."\
+\'95  \b Universe expansion:\b0  COMPLETED. Extracted 14 new tickers from existing ORATS archive and ran wide-wings backtest. ADD to shortlist: NVDA, AMZN, GOOGL (Mag 7 gap, all walk-forward-validated), plus SCCO, GOLD, CLF as low-conviction diversifiers. REJECT: AU, KGC, PAAS, BKR, NUE, STLD, TECK, SLB (walk-forward fails).\
+\
+\b Still pending\b0\
+\
+\'95  \b True daily-marks stop-loss.\b0  The dte_21 proxy falsified a mid-cycle check-point stop, but a true daily-marks stop-loss has not been tested. Would require Black-Scholes marking from ORATS data or actual mid-cycle chain queries. The dte_21 finding strongly suggests daily marks won't rescue a stop policy (daily is noisier than single-point), but not definitive.\
+\'95  \b GOOGL term-inversion gate-hurt puzzle.\b0  GOOGL standalone IF is positive (+$2.26/cycle full sample) but the term-inversion gate HURTS on GOOGL (\'96$2.29 lift, N=49). Small-sample variance may be a factor. Hypotheses to investigate: GOOGL's earnings schedule may cluster near term-inverted days; regulatory news-flow may not fit the generic regime. Recommendation for now: run GOOGL without the gate.\
+\'95  \b Mag 7 completion.\b0  AMZN, GOOGL, NVDA now in universe. Remaining untested: none (Mag 7 = AAPL + MSFT + AMZN + GOOGL + META + NVDA + TSLA; AAPL and MSFT are already in 150-universe). Mag 7 coverage is complete.\
+\'95  \b Rolling walk-forward at shorter windows.\b0  Phase C tested four 10-year-train / 3-year-validate windows. A shorter 5-year-train / 2-year-validate schedule across the full sample (~7 windows) would tighten the stability claim but was not run.\
+\
+
+\f0\b\fs26 ZEBRA (Zero Extrinsic Back Ratio)\
+\
+\f1\b0\fs24 A ZEBRA is a 3-contract single-underlying structure designed to replicate long stock exposure with negligible time decay. Buy 2\'d7 ITM call at ~70\uc0\u916  + sell 1\'d7 ATM call at ~50\uc0\u916 . All three legs share the same expiration. Net debit at entry. Defined risk: max loss = the debit, realized only if spot expires below the long-call strike. The structural property: when the extrinsic value collected from the short ATM call is at least equal to the total extrinsic paid for the two long ITM calls, the position has zero (or positive) net theta and time passes without bleeding the position. Net delta at entry is approximately +0.90 to +1.15, comparable to long stock with slight upward leverage from the practitioner search.\
+\
+Pre-registered and tested 2026-04-25 (docs/ZEBRA_PREREG.md). All four pre-reg hypotheses pass at slip=0.50: extrinsic-rule fire rate ~95%, flat-day MTM mean +$0.58/day (no theta drag, in fact slightly positive), median upside capture ratio 1.152 (BEATS long stock on upside cycles), capital efficiency 0.21 (debit is 21% of stock cost). Walk-forward validates on 13 of 13 top cohort names. Detail: project_zebra_findings.md.\
+\
+\b Why this fits the plan\b0\
+\
+\'95  Defined-risk by construction (max loss = debit), policy-compliant.\
+\'95  Long-stock-equivalent with capped downside \'97 reduces capital-at-risk versus owning shares while preserving (and slightly leveraging) upside.\
+\'95  Different cadence (75-DTE) and different deployment thesis (high-conviction directional) from the credit-spread book \'97 fills a real gap.\
+\'95  Mean P&L beats long stock on the deployable cohort 2.13\'d7 in the historical sample.\
+\
+\b Trade mechanics \'97 tested entry/exit rules\b0\
+\
+\'95  \b Entry (VALIDATED).\b0  ~75 calendar days to expiration on a monthly OpEx; snap to nearest trading day. Buy 2\'d7 long call at ~70\uc0\u916 ; sell 1\'d7 short call at ~50\uc0\u916  (ATM). Same expiration.\
+\'95  \b Practitioner construction (VALIDATED).\b0  In every cycle, search ITM call strikes from 0.55\uc0\u916  to 0.90\uc0\u916  and pick the candidate closest to 0.70\uc0\u916  whose extrinsic value satisfies short_extrinsic \uc0\u8805  2\'d7 long_extrinsic. The literal 70/50 spec satisfies this rule on only some cycles; the practitioner search satisfies it on ~95%. If no candidate satisfies the rule on a given chain, skip the cycle.\
+\'95  \b Pre-flight check.\b0  At entry, compute (short_extrinsic \'96 2\'d7 long_extrinsic). This is the extrinsic cushion. Must be \uc0\u8805  $0 or do not open.\
+\'95  \b Exit (VALIDATED).\b0  Held to expiration. No managed exit. The structure earns its expected payoff at expiry; closing early forfeits the gamma-driven excess return that compounds in the final weeks.\
+\'95  \b Sizing.\b0  Capital-outlay-based, NOT per-contract. See Position Sizing section. Single AMZN/GOOGL contracts can carry $50K\'96$70K of capital outlay; SPY/QQQ contracts are roughly $7K\'96$10K each. Sizing must be aligned to book equity, not to a per-contract target.\
+\'95  \b Execution.\b0  Open all three legs simultaneously on a single combo ticket. The two long calls share the same strike, so the broker should execute them as 2-for-1 buy and 1-for-1 sell. Slip sensitivity is minimal (slip=0.25 vs 0.50 differs by <$0.05/share on cohort means).\
+\
+\b Symbols that respond well (TESTED)\b0\
+\
+\i Tier 1 \'97 high-conviction Mag-7 + indices.\i0  All positive in train AND validation; all median capture \uc0\u8805  1.05.\
+\
+\'95  \b SPY:\b0  +$7.36/share mean (slip=0.50), 80% win, capture 1.058. Index-anchored, smallest tail of the cohort (\'96$103/share worst). Capital outlay ~$70/share = $7K/contract.\
+\'95  \b QQQ:\b0  +$8.15/share mean, 77% win, capture 1.102. Tech-tilt of the index, slightly higher gamma capture than SPY.\
+\'95  \b MSFT:\b0  +$3.19/share mean, 69% win, capture 1.152. Steady growth name; smaller magnitude than indices but higher capture ratio.\
+\'95  \b NVDA:\b0  +$19.28/share mean, 70% win, capture 1.151. Massive gamma capture in 2023-2026 validation (val mean +$30.23 vs train +$15.47). Tail \'96$308/share \'97 size carefully.\
+\'95  \b GOOGL:\b0  +$18.74/share mean, 69% win, capture 1.126. Mag-7 directional bias; pairs naturally with the validated GOOGL inverted_fly standalone.\
+\'95  \b META:\b0  +$18.53/share mean, 60% win, capture 1.185. Thin sample (N=45) compared to other Mag-7; directional edge is consistent but point estimate has wider error bars.\
+\'95  \b AMZN:\b0  +$33.48/share mean (largest in cohort), 67% win, capture 1.140. Stunning gap vs long-stock: AMZN long stock returned \'96$6.27/share over the same 75-day windows; ZEBRA returned +$33.48. Pure gamma capture. Capital outlay $40K\'96$70K per contract \'97 effectively excluded for paper-test sizing under $100K book.\
+\
+\i Tier 2 \'97 broad diversifiers.\i0  Validated walk-forward at smaller magnitude; lower-conviction additions to round out the book.\
+\
+\'95  \b DIA:\b0  +$4.30/share mean, 73% win, capture 1.058. Industrials-tilted index; correlated with SPY but offers some sector diversification.\
+\'95  \b IWM:\b0  +$2.02/share mean, 68% win, capture 1.114. Small-cap exposure; thinner tails than indices but smaller mean.\
+\'95  \b GLD:\b0  +$4.37/share mean, 58% win, capture 1.118. Gold ETF; flat-day MTM lower than equity names (less vega exposure to IV-up days), but the upside-capture property holds.\
+\'95  \b TJX:\b0  +$3.11/share mean, 72% win, capture 1.193. Cross-validates with the bull_put TJX entry; same name, different structure.\
+\'95  \b GE:\b0  +$4.87/share mean, 56% win, capture 1.215. Industrial; STRONG validation lift (val +$20.16 vs train \'96$0.82 \'97 caught the 2023-2026 GE rally).\
+\'95  \b WMT:\b0  +$2.04/share mean, 64% win, capture 1.156. Defensive consumer; cross-validates with bull_put_mp roll-favorable list.\
+\'95  \b AMD:\b0  +$2.57/share mean, 64% win, capture 1.247. High-vol semi; cross-validates with the inverted_fly AMD standalone.\
+\'95  \b PLTR:\b0  +$6.58/share mean, 63% win, capture 1.221. High-news-vol single; cross-validates with PLTR earnings inverted_fly carve-out.\
+\
+\b Symbols that do NOT respond well (TESTED, EXCLUDED)\b0\
+\
+Cyclicals and commodity-flow names where the underlying did not sustain a directional bullish trend in the test window. Median capture is still > 1.0 on most of these, but the baseline stock return was flat-to-negative, so the upside-capture mechanism had nothing to capture.\
+\
+\'95  \b CAR\b0  \'96$3.63/share, \b BABA\b0  \'96$1.69, \b RRC\b0  \'96$1.43, \b CNC\b0  \'96$1.16, \b CLF\b0  \'96$0.85, \b NUE\b0  \'96$0.69, \b GOLD\b0  \'96$0.57. Excluded from the deployment cohort.\
+\'95  Other near-zero results (KO, PG, INTC, XOM, NEM, EFA, HYG, CNQ, RIO, DAL, XLU, SCCO, WFC) are also outside the deployment list \'97 not negative enough to call them losers, but no meaningful directional edge for stock replacement.\
+\
+\b Macro\b0\
+\
+\'95  \b Favorable.\b0  Bullish trend regimes \'97 the gamma capture mechanism amplifies returns when underlyings rally. 2023-2026 validation window was uniformly stronger than 2013-2022 train across all top names.\
+\'95  \b Neutral.\b0  Sideways/flat regimes \'97 the zero-theta property protects the position from time bleed. Flat-day mean MTM change was +$0.58/day across the cohort \'97 sideways stocks slightly grow the position rather than shrink it.\
+\'95  \b Unfavorable.\b0  Sustained crash regimes \'97 ZEBRA absorbs full debit loss when spot expires below the long-call strikes. Defined-risk floor holds (max loss = debit), but the loss is real. In contrast to long stock the loss is capped at ~21% of equivalent share-purchase capital, but per-contract dollar damage on high-priced names (AMZN \'96$726, GOOGL \'96$654, TSLA \'96$565) is large \'97 sizing matters.\
+\
+\b Rolling (NOT YET TESTED)\b0\
+\
+\'95  Rolling a ZEBRA forward to the next monthly OpEx is an open question. The natural trigger would be DTE \uc0\u8804  21 (when long-call gamma starts decaying rapidly). Whether rolling captures the next 75-day gamma cycle without forfeiting the current gain is an empirical question the test did not address. Held-to-expiration is the only validated treatment.\
+\
+\b Expected outcomes (slip=0.50, 75-DTE held to expiry)\b0\
+\
+\'95  Cohort mean (excluding excluded names): +$4.83/share, win rate 61%.\
+\'95  Tier 1 mean (SPY/QQQ/MSFT/NVDA/GOOGL/META/AMZN): +$15.49/share. Tier 2 mean: +$3.39/share.\
+\'95  Median upside capture (when stock ended above entry): 1.152 \'97 ZEBRA captures 15% more than long stock.\
+\'95  Capital efficiency (debit / spot): 21% mean, 13-30% range across the cohort.\
+\'95  Worst-case loss: capped at debit per contract. Concentrated in high-priced names \'97 size by capital outlay, not contract count.\
+\'95  Best train/val behavior: NVDA, QQQ, SPY, GE, GLD all show stronger validation than train, consistent with 2023-2026 bullish regime amplifying the gamma capture mechanism.\
+\'95  Slip sensitivity: minimal. slip=0.25 vs slip=0.50 differs by <$0.05/share at cohort means \'97 ZEBRA's edge is dominated by the long-stock-equivalent payoff at expiry, not by the bid-ask cost of entry/exit.\
+\
+\b Pending investigations\b0\
+\
+\'95  Rolling at DTE\uc0\u8804 21 to next monthly OpEx \'97 captures the next gamma cycle?\
+\'95  Walk-forward on the bottom cohort to confirm the directional-bias-required interpretation \'97 if cyclical names show flat-out positive ZEBRA in a future bull regime, the exclusion list may need revisiting.\
+\'95  Whether ZEBRA on bull_put cohort names (e.g., MSFT, TJX, WMT) outperforms running bull_put on those names per-cycle on a capital-adjusted basis. Different sizing baselines make a direct comparison non-trivial.\
+\
+\f0\b\fs28 Earnings Plays (Tested 2026-04-25)\
+
+\f1\b0\fs24 A separate trade family from the OpEx-anchored book. The 2026-04-24 bias scan established directional priors on stock prices; the 2026-04-25 structure-level backtest converted those priors into option-structure P&L tests. \b One cohort-level rule promotes (T1: bull put on bias-up names, held to expiration).\b0  Two single-name additions also promote. T2 and T4 cohort-level treatments remain non-tradeable per the test outcomes.\
+\
+\b Why we run this track\b0\
+\
+\'95  Earnings dates are calendar-known and create bimodal moves \'97 a fundamentally different driver than OpEx pinning, with overlapping short-premium edge mechanics.\
+\'95  Post-announcement IV crush is well-documented: implied volatility typically collapses from its earnings-day peak within 24 hours, regardless of direction.\
+\'95  Different calendar driver, often non-overlapping underlying selection, deploys capital in weeks where neither OpEx window is active.\
+\'95  Defined-risk only per user policy. No naked short strangles, naked short straddles, or unhedged naked puts into earnings.\
+\
+\b Pre-registered tests run (2026-04-25)\b0\
+\
+Pre-registration document: docs/EARNINGS_PREREG.md (sealed before code ran). Synthetic non-earnings control: 5\'d7 the per-ticker N, \'b110 trading-day buffer around real events. Test matrix: \{T-3, T-1\} entry \'d7 \{T+1, T+3, exp\} exit \'d7 \{0.25, 0.50\} slip.\
+\
+\'95  \b T1\b0  Bull put on bias-up names (SCCO, CNQ, KO, NUE, KGC, GOOGL, NRG, RRC, META, WFC; CX and ITUB infeasible due to penny-stock pricing data).\
+\'95  \b T2\b0  Bear call on bias-down names (INTC, JBLU, NEM, GLNG, FCX, VST, CAR).\
+\'95  \b T3\b0  Non-earnings control on the same names (already implemented as the comparison cohort for T1, T2, T4).\
+\'95  \b T4\b0  Inverted fly on high-vol bias-ambiguous names (RIG, ENPH, PLTR, SNAP, TME, TEVA, CFLT).\
+\'95  T5 (covered call) deferred \'97 requires stock-ownership P&L modeling not in the engine.\
+\
+\b T1 Bull Put \'97 Earnings (PROMOTED)\b0\
+\
+Status: validated 2026-04-25, promoted to live paper-test consideration.\
+\
+\i Cohort.\i0  SCCO, CNQ, KO, NUE, KGC, GOOGL, NRG, RRC, META, WFC. NRG drops on per-ticker negative lift. KGC sample too thin (N\uc0\u8804 3). CX and ITUB rejected post-hoc \'97 strike grid + $2 wing floor produces negative credit.\
+\
+\i Structure.\i0  Short 30\uc0\u916  put + long put one wing-width below. Wings: 0.5% of spot, $2 absolute floor. Use the next monthly OpEx after the earnings date with at least three trading days of buffer. Cap at 60 calendar days to expiration.\
+\
+\i Entry.\i0  The close of the trading day three days before earnings (T-3). T-1 entry produces almost identical outcomes; T-3 is preferred because it gives more execution time and the credit is slightly larger.\
+\
+\i Exit.\i0  Held to monthly OpEx expiration. Short-dated exits (T+1, T+3) give back most of the edge. The mechanism: the implied-vol crush is captured by T+1, but residual gamma erodes the rest of the credit unless held to expiry.\
+\
+\b Expected outcomes (slip=0.50, the harsher friction)\b0\
+\
+\'95  T-3 entry, exp exit: N=175, mean +$0.245/cycle, 82% win, lift +$0.289 vs control, p=0.005.\
+\'95  T-1 entry, exp exit: N=173, mean +$0.197/cycle, 80% win, lift +$0.329 vs control, p=0.003.\
+\
+\b Per-ticker P&L (slip=0.50, T-3 exp, sorted by lift)\b0\
+\
+\'95  \b GOOGL\b0  +$0.92 mean, 83% win, lift +$0.71 \'97 strongest single name\
+\'95  \b NUE\b0  +$0.34 mean, 91% win, lift +$0.74 \'97 steel; tight std\
+\'95  \b META\b0  +$0.63 mean, 87% win, lift +$0.38 \'97 confirms earnings up-bias\
+\'95  \b KO\b0  +$0.16 mean, 88% win, lift +$0.34 \'97 defensive; tightest std\
+\'95  \b WFC\b0  +$0.16 mean, 82% win, lift +$0.21 \'97 modest\
+\'95  \b RRC\b0  +$0.07 mean, 71% win, lift +$0.20 \'97 modest\
+\'95  \b CNQ\b0  \'96$0.01 mean at T-3; use T-1 instead (T-1 mean +$0.30, lift +$0.32)\
+\'95  \b SCCO\b0  \'96$0.10 mean at T-3 (NEGATIVE); use T-1 instead (T-1 mean +$0.15, lift +$0.46)\
+\
+SCCO and CNQ are T-1-only names within this cohort. All others use T-3.\
+\
+\i Falsification criterion (defined in pre-registration):\i0  lift \uc0\u8804  0 vs control at slip=0.50. Not met. Cohort survives.\
+\
+\b What this rule looks like in deployment\b0\
+\
+\'95  Watch the earnings calendar for cohort names.\
+\'95  At the close of T-3 (or T-1 for SCCO and CNQ), open one bull put vertical per name on the next monthly OpEx, 30\uc0\u916  short, 0.5%-of-spot wing (floor $2).\
+\'95  Hold to monthly OpEx expiration; do not close on T+1 or T+3.\
+\'95  One contract baseline. Sizing per the Position Sizing rules elsewhere in this plan \'97 defined-risk credit spreads with paper-test loss budget.\
+\
+\b T2 Bear Call \'97 Earnings (NOT PROMOTED)\b0\
+\
+Status: tested 2026-04-25; cohort rule fails the absolute-mean test even though the lift over control is statistically significant.\
+\
+\i Cohort tested.\i0  INTC, JBLU, NEM, GLNG, FCX, VST, CAR.\
+\
+\i Cohort-level result at slip=0.50:\i0  every (entry, exit) cell shows positive lift over the non-earnings control (best: T-1 exp +$0.188 lift, p=0.016, mean +$0.023). But the absolute mean hovers near zero in every cell, and falls slightly negative for T-3 entries.\
+\
+\i Interpretation:\i0  earnings-aligned bear call on bias-down names is \b less bad\b0  than non-earnings bear call on those same names. It is not a profit strategy. Consistent with Phase 2h (bear_call aggressive standalone fails: \'96$0.087/cycle, 21.7% win) and the broader regime-symmetry finding that bear_call only works in confirmed bear regimes.\
+\
+\b Single-name carve-out \'97 INTC bear_call earnings\b0\
+\
+The only cohort name with positive absolute mean across multiple cells. T-1 exp slip=0.50: +$0.145 mean, 82% win, +$0.318 lift. T-3 exp slip=0.50: +$0.137 mean, 78% win, +$0.405 lift. INTC's 26%-positive earnings rate (the deepest down-bias in the entire bias scan, mean \'96$5.46%) translates into clean bear-call P&L on the structure level.\
+\
+\i Deployment guidance:\i0  do not deploy the cohort. INTC bear_call earnings is acceptable as a single-name addition with the same entry/exit rules as T1 (T-1 close entry, held to monthly OpEx expiration). All other cohort names stay flat or slightly negative; do not deploy.\
+\
+\b T4 Inverted Fly \'97 Earnings (COHORT INCONCLUSIVE; PLTR PROMOTES)\b0\
+\
+Status: tested 2026-04-25; cohort-level finding statistically weak (p=0.53 on the best cell), but PLTR single-name is a clean standout.\
+\
+\i Cohort tested.\i0  RIG, ENPH, PLTR, SNAP, TME, TEVA, CFLT.\
+\
+\i Cohort-level at slip=0.50, T-3 exp:\i0  mean +$0.171, 69% win, lift +$0.10 over control, p=0.53. Variance dominated by ENPH outliers. Other cells weak or negative.\
+\
+\b Single-name promotion \'97 PLTR inverted_fly earnings\b0\
+\
+N=22 at T-3 exp slip=0.50: +$0.82 mean, 82% win, +$0.83 lift over control. Cleanest long-vol earnings result in the entire scan. The structure: 10% wings (canonical wide-wings cell), entered at T-3, held to monthly OpEx.\
+\
+\i Per-ticker context:\i0  SNAP (+$0.16 mean, +$0.32 lift), CFLT (+$0.18, +$0.16), TEVA (+$0.10, +$0.15), and TME (+$0.12, +$0.11) are modestly positive but small absolute. RIG and ENPH are net negative \'97 exclude. The cohort interpretation: long-vol structures earn their keep on truly news-reactive single names, not as a sector basket.\
+\
+\i Deployment guidance:\i0  PLTR-only as a paper-test single-name long-vol earnings play. Do not deploy the cohort.\
+\
+\b Promoted earnings book (deployment summary)\b0\
+\
+Three additions to the active set, ranked by edge:\
+\
+\'95  \b Bull Put \'97 Earnings, cohort rule.\b0  T-3 entry (T-1 for SCCO and CNQ), held to monthly OpEx, 30\uc0\u916  short, 0.5%-spot/$2-floor wings. Names: GOOGL, NUE, META, KO, WFC, RRC, SCCO, CNQ. Drop NRG. KGC sample too thin.\
+\'95  \b INTC bear_call \'97 Earnings, single-name.\b0  T-1 entry, held to monthly OpEx, same structural spec mirrored to call side. Aligned with INTC's \'96$5.46% mean earnings-day return.\
+\'95  \b PLTR inverted_fly \'97 Earnings, single-name.\b0  T-3 entry, held to monthly OpEx, 10% wings. Aligned with PLTR's high-news-volatility profile.\
+\
+\b Caveats before live capital\b0\
+\
+\'95  N per cell is small (~150-175 for the T1 cohort, ~22 for single names). Statistical significance at p<0.01 for the cohort is meaningful but not bulletproof at this sample size.\
+\'95  Sample is 2020-2026, a specific macro regime (post-COVID, tech bull, commodity bull-then-consolidation). Pre-2020 behavior of the same names may differ; post-2026 unknown.\
+\'95  Earnings windows and friction widen during macro stress; the slip=0.50 test is a pessimistic baseline but actual fills can be worse on earnings-day chains, especially the T-1 entry.\
+\'95  yfinance earnings calendar excludes ETFs and limits to ~6 years.\
+\'95  Bias frequency does NOT directly measure trade P&L. The structure-level test is what validates edge; the bias scan is a screening tool only.\
+\'95  Single-name promotions (INTC, PLTR) are explicitly carve-outs and should be sized smaller than cohort-rule positions.\
+\
+\b Still pending\b0\
+\
+\'95  Annual refresh of the earnings bias table \'97 biases shift with management and regime changes.\
+\'95  Re-run T1/T2 with weekly expirations on names that have them (current test uses monthly OpEx only; weekly expirations would be a higher-IV-crush variant).\
+\'95  Test T1 with managed exit (50% profit target) instead of held-to-expiration to see if managed pays off when the held-to-exp number is already positive.\
+\'95  Cross-reference live forward-test outcomes against the slip=0.50 backtest predictions at the 2026-08-19 paper-test gate.\\
+\
+
+\f0\b\fs28 Management & Exit\
+
+\f1\b0\fs24 \i Scope: management and exit rules for bull_put and bear_call only. Inverted fly management (50%-profit target, held-to-expiration otherwise, no time stop) appears in the Inverted Fly section above. ZEBRA management (held to expiration, no managed exit) appears in the ZEBRA section above. Iron condors and iron flies were tested and rejected; see What Doesn't Work.\i0\
+\
+\b Exit rules\b0\
+\
+\'95  \b Window A (45-DTE managed):\b0  first-trigger close on either (a) 50% of max profit reached or (b) DTE <= 21. Whichever comes first. Applies to both bull_put and bear_call.\
+\'95  \b Window B (near-OpEx T-5 entry):\b0  held to expiration. No early exit. Tested in Phase 2c and Phase 2d/e \'97 T-3 exit rule hurts 7 of 8 premium-seller structures.\
+\'95  Mid-cycle profit-taking outside these rules is not validated. TastyTrade first-trigger management mildly hurts bull_put at slip=0.25 compared with 50%-only exit, but is the conservative default.\
+\
+\b Rolling \'97 bull_put (validated in Phase 2g)\b0\
+\
+\'95  \b Trigger:\b0  mark-to-market loss >= 1x entry credit\
+\'95  \b Style:\b0  down-and-out. Close the losing position; open a fresh bull_put at the new max-pain strike on the next monthly OpEx\
+\'95  \b Credit requirement:\b0  the roll must open for a net credit. If not, accept the loss and do not roll\
+\'95  \b Cap:\b0  one roll per original cycle. Serial rolling is untested and not permitted\
+\'95  \b Per-name selectivity:\b0  SPX, WMT, DIA, VNQ, QQQ, TLT, SPY benefit from rolling. XLU, IYR, XLV, KO do NOT \'97 hold to expiry on these names\
+\'95  Do NOT apply the contango+VRP>0 rule at the trigger day. The entry filter helps at entry; at trigger day it selects against rollable cycles\
+\'95  Do NOT use spot-based stops. Short puts mean-revert enough that intraweek breach is not a reliable kill signal\
+\
+\b Rolling \'97 bear_call (tested H3 2026-04-24: FALSIFIED)\b0\
+\
+\'95  Do NOT roll bear_call positions. Hold to expiry per Window A / Window B rules.\
+\'95  H3 test on 125 triggered cycles: unconditional roll produced combined mean -$0.946 vs accept-loss baseline -$0.855. Rolling compounds losses.\
+\'95  Only 29.6% of rolls improved the outcome. Even regime-gated rolling (SPY < 200dma at entry) gave only a tiny +$0.018 lift on a small sample.\
+\'95  Mechanism: bear_call up-and-out rolls require spot > MP again at T-5 entry, which in a persistent bull means opening another ITM position against the trend.\
+\
+\b Stops that do not work (tested and rejected)\b0\
+\
+\'95  \b T-3 exit rule:\b0  hurts 7 of 8 premium-seller structures. Theta harvest lives in the final 2 days.\
+\'95  \b MTM-based mid-cycle stop\b0  (close if MTM <= 0 on Tuesday): 76.8% of red-Tuesday cycles recover by expiry.\
+\'95  \b Spot-based stop\b0  (close if spot breaches short strike): crystallizes losses that would have reverted.\
+\
+\b Expected trigger frequencies\b0\
+\
+\'95  50% profit trigger on bull_put: fires early on roughly 30-40% of cycles\
+\'95  21-DTE trigger: fires on the remainder, roughly 60-70% of cycles\
+\'95  MTM roll trigger on bull_put_mp: fires on roughly 34% of cycles (Phase 2g)\
+\
+
+\f0\b\fs28 Position Sizing\
+
+\f1\b0\fs24 \i Scope: sizing rules for bull_put, bear_call, inverted_fly, and ZEBRA. Inverted fly sizing is described in its own section (by dollar debit per contract). ZEBRA sizing is described below \'97 capital-outlay-based, not per-contract \'97 because per-contract debits range from ~$7K (SPY) to ~$70K (AMZN). Iron condors and iron flies were tested and rejected.\i0\
+\
+\b First-pass caveat.\b0  The specific percentages below (1.5% per bull_put position, 0.5% per bear_call, 3% per underlying, 40% per cluster, SPX 3x weighting, 15% book-wide) are first-pass defaults for a new trading system. They are not derived from a tested sizing study \'97 they are conservative judgment calls anchored to the defined-risk max losses already present in the strategy. Only paper-test and live experience through the 2026-08-19 window and beyond will tell whether these caps are too tight, too loose, or correctly calibrated. Treat them as a starting discipline, revisit at cycle closes, and update this section in the Revision Log as experience accumulates.\
+\
+\b Core thesis\b0\
+\
+Size by dollar risk (notional max loss), not by contract count. One SPX contract is roughly 100x one XLU contract in dollar terms; contract-based sizing would concentrate risk in a single name.\
+\
+\b Per-position dollar risk caps\b0\
+\
+\'95  Each bull_put position: max loss <= 1.5% of account capital\
+\'95  Each bear_call position (when deployed): max loss <= 0.5% of account capital (one-third bull_put sizing per Regime Overrides)\
+\'95  On a $100,000 base: approximately $1,500 max risk per bull_put, $500 max risk per bear_call\
+\
+\b Concentration caps\b0\
+\
+\'95  \b Per underlying:\b0  total max loss across all positions on the same symbol <= 3% of account\
+\'95  \b Per cluster:\b0  total max loss in any single archetype cluster <= 40% of total book max loss\
+\'95  \b SPX-specific:\b0  SPX max loss counts triple against the per-cluster cap \'97 a $3,000 SPX position consumes the same concentration budget as a $9,000 position in another cluster-2 name\
+\'95  \b Book-wide:\b0  total max loss across all open bull_put + bear_call positions <= 15% of account capital at any time\
+\
+\b Bull_put vs bear_call sizing ratio\b0\
+\
+\'95  Normal bull regime: bull_put at full size; bear_call at zero\
+\'95  Confirmed bear meeting the 4-condition deployment gate: bull_put downsizes per Regime Overrides soft triggers; bear_call deploys at one-third the comparable bull_put dollar-risk cap\
+\'95  Total book max-loss budget does not change between regimes; composition does\
+\
+\b Soft-downsize triggers (from Regime Overrides)\b0\
+\
+When any soft-downsize trigger fires (SPY 252-day IV rank > 0.7, SPY near 200dma from above trending down, term inverted + VIX > 20): cut new bull_put entries to 50% of the cap until the triggers resolve.\
+\
+\b ZEBRA sizing \'97 capital-outlay-based, NOT per-contract\b0\
+\
+ZEBRA does not fit the dollar-risk-cap framework above because its sizing constraint is the upfront debit (capital tied up), not max loss as a percentage of account. A single AMZN ZEBRA contract carries $40K\'96$70K of capital outlay; an SPY contract is ~$7K. Per-contract sizing would either over-deploy capital on high-priced names or under-deploy on indices.\
+\
+\'95  \b Capital outlay per ZEBRA position:\b0  5\'9610% of book equity. For a $100K paper-test book, target $5K\'96$10K outlay per ZEBRA, then divide by per-contract debit to get the contract count (rounded down).\
+\'95  \b Tier 1 names (SPY, QQQ, MSFT, NVDA, GOOGL, META, AMZN):\b0  high-conviction; size at the upper end of the range (8\'9610%).\
+\'95  \b Tier 2 names (DIA, IWM, GLD, TJX, GE, WMT, AMD, PLTR):\b0  lower-conviction; size at the lower end (5\'967%).\
+\'95  \b Excluded by sample-size thresholds:\b0  AMZN, GOOGL, META, NVDA all have per-contract debits above $20K. On a $100K book under the 10% cap, these are 0\'961 contract positions \'97 either commit one full contract (consuming 50%+ of the ZEBRA book budget) or skip these names. AMZN ZEBRA at $70K debit is effectively excluded under any retail book under $700K.\
+\'95  \b Total ZEBRA book-equity allocation:\b0  no more than 30% of book equity in open ZEBRA positions at one time. Combined with the 15% book-wide max-loss cap on credit spreads, this leaves ~55% of book in cash or money market \'97 acceptable for paper testing.\
+\'95  \b Worst-case loss:\b0  capped at debit per contract. The full debit is realized only if spot expires at or below the long-call strike. Sizing must contemplate a 100% loss of the upfront debit on a given position \'97 do not anchor on the historical mean P&L when sizing.\
+\
+\b Paper-test window\b0\
+\
+All sizing rules above apply to paper capital through approximately 2026-08-19. Live capital deployment requires explicit reconsideration beyond that date.\
+\
+\b When the book is at cap\b0\
+\
+\'95  Do not add new positions even if a high-conviction signal fires. Wait for an exit or roll to free budget.\
+\'95  Do not oversize to chase an attractive setup. The discipline is the edge.\
+\
+
+\f0\b\fs28 Regime Overrides\
+
+\f1\b0\fs24 Bull put and bear call are not two strategies with independent edges. They are the same edge running in opposite directions, and the edge lives in regime selection. This section captures what we know about regime identification and how to adjust sizing when the regime is unclear.\
+\
+\b The core asymmetry (backtested, 2013-2026)\b0\
+\
+Managed-exit, dte_45 entry, slip=0.25, full 150 universe. Mean P&L per cycle:\
+\
+\'95  Non-crash: bull_put +$0.040, bear_call -$0.099\
+\'95  COVID 2020: bull_put -$0.531, bear_call +$0.107\
+\'95  2022 bear: bull_put -$0.150, bear_call +$0.098\
+\'95  Dec 2018: bull_put -$0.574, bear_call +$0.177\
+\'95  Aug 2015: bull_put -$0.185, bear_call +$0.136\
+\'95  Volmageddon 2018: bull_put -$0.279, bear_call +$0.212\
+\
+The sign flips cleanly in every tested bear window. The 14-year sample is bull-dominated, which is why bull_put carries the baseline edge \'97 that is a regime fact, not a structural advantage.\
+\
+\b Which signals predict the flip? (Signal study, 2026-04-24)\b0\
+\
+Tested individual signals against forward 45-day drawdowns <= -7% across 13 years of SPY data. Base rate = 15.5% of days are followed by a -7% drawdown within 45 days.\
+\
+\i Individual signal precision (crash rate when signal fires):\i0\
+\
+\'95  SPY < 200-day MA: 33.2%, 2.15x lift \'97 strongest, but reactive (fires after drawdown has begun)\
+\'95  IV rank 252-day > 0.7: 29.0%, 1.88x \'97 best predictive signal; fires 5.5% of days\
+\'95  Term structure inverted (front > back): 22.3%, 1.44x\
+\'95  ATM IV > 0.2: 20.5%, 1.33x\
+\'95  \b SPY > +10% over 200-day MA: 9.7%, 0.63x \'97 DIS-informative.\b0  Overbought markets are statistically safer than average, not more dangerous.\
+\'95  SPY > +15% over 200-day MA: 1.9%, 0.12x \'97 strongly counter-intuitive.\
+\
+\i Composite-signal precision:\i0\
+\
+\'95  At least 2 of 5 conditions firing: 17.0%, 1.10x \'97 essentially noise\
+\'95  At least 3 of 5 firing: 24.3%, 1.58x \'97 modest lift, fires 5% of days\
+\
+\i Per-downturn composite firing at T-20:\i0  COVID fires (2/5), 2022 bear fires (3/5), Dec 2018 does not fire, Aug 2015 does not fire, Volmageddon does not fire. \b Two of five tested downturns came with essentially no advance warning.\b0\
+\
+\b Weekly IV-HV and trend persistence (tested 2026-04-24)\b0\
+\
+Daily IV/HV crossovers are too noisy to act on. A weekly aggregation was tested directly, with 5-week forward trend persistence (same side of 50-day MA) as the outcome.\
+\
+\i Baseline: 5-week trend persistence = 64.2% of weeks\i0\
+\
+\i The trend-is-your-friend axiom is asymmetric:\i0\
+\
+\'95  \b In a bull (SPY > 50dma):\b0  trend holds 5 weeks 75.2% of the time; average forward 5-week return +0.80%\
+\'95  \b In a bear (SPY < 50dma):\b0  trend holds 5 weeks only 34.6% of the time; average forward 5-week return \b +2.03%\b0\
+\
+When SPY is below its 50-day MA, the base rate is a rally back within 25 days, not continuation of weakness. This is the Dec 2018 V-bottom pattern and the Aug 2015 flash-crash-then-recovery pattern. Bears mean-revert faster than bulls do.\
+\
+\i Weekly VRP sign stability as a modest confirmation signal:\i0\
+\
+\'95  Bull + VRP same sign >= 8 weeks: 80.2% 5-week persistence (small lift over 75.2% bull baseline)\
+\'95  Bear + VRP same sign >= 8 weeks: 34.8% (no lift over 34.6% bear baseline)\
+\
+Weekly VRP stability adds small conviction in a bull, none in a bear.\
+\
+\i Boom-from-tranquility events:\i0  Dec 2018 and Volmageddon both occurred from 10+ weeks of stable positive VRP. No weekly signal gave any warning for these events. Sizing discipline and defined-risk structure are the only defense.\
+\
+\b Soft-downsize triggers (not hard stops)\b0\
+\
+When any of these fire, cut new bull_put entry size by 50% and do not add new positions beyond half size:\
+\
+\'95  SPY 252-day IV rank > 0.7\
+\'95  SPY within 2% of its 200-day moving average from above, trending down\
+\'95  Term structure inverted AND VIX > 20\
+\
+\b Hard pause trigger\b0\
+\
+When all three of these fire, stop opening new bull_put positions entirely until the set resolves:\
+\
+\'95  SPY below 200-day moving average\
+\'95  Term structure inverted\
+\'95  SPY 252-day IV rank > 0.5\
+\
+\b Bear_call deployment gate (validated H1 filter, 2026-04-24)\b0\
+\
+Tested on 2,686 Phase 2h cycles. The validated filter is:\
+\
+\'95  \b SPY below 200-day moving average\b0\
+\'95  \b SPY 252-day IV rank > 0.5\b0\
+\
+Under this two-condition gate: mean +$0.092/cycle, 40% win rate, N=102 over 13 years of history. Lifts baseline by +$0.179.\
+\
+\b Important negative finding:\b0  term structure inversion does NOT improve the gate. Adding "term inverted" to the filter HURTS performance (the SPY<200dma + term-inverted cohort produces -$0.152/cycle). The intuition-driven hypothesis of "symmetric opposite of bull_put calm-regime filter" is falsified.\
+\
+\b Additional durability precaution (not directly tested, derived from trend-persistence asymmetry):\b0  because bear trends persist only 35% of 5-week windows, consider requiring SPY has been below its 50-day MA for at least 4 consecutive weeks before deploying \'97 evidence the bear has legs, not just onset. This is a conservative overlay, not a validated filter.\
+\
+\b Deliberate asymmetry between bull_put pause and bear_call deploy gates.\b0  The bull_put hard-pause trigger requires three conditions (SPY < 200dma AND term inverted AND SPY 252-day IV rank > 0.5). The bear_call deployment gate requires only two (SPY < 200dma AND SPY 252-day IV rank > 0.5) \'97 term inversion is deliberately NOT required. This is not an oversight. The H1 filter test showed term inversion is DIS-informative for bear_call entry (adding "term inverted" to the SPY<200dma+IVR>0.5 filter drops mean P&L from +$0.092 to \'96$0.152 per cycle). So in a "SPY < 200dma + SPY IVR > 0.5 + contango" regime, the bull_put book is at soft-downsize (half-size, not paused) while the bear_call gate fires and new bear_call positions can be opened. Both books can run simultaneously in that regime. Hard pause of bull_put waits for the additional term-inversion confirmation because bull_put, unlike bear_call, actually benefits from avoiding the full three-condition stress state. Read this asymmetry as evidence-supported, not as a logical inconsistency.\
+\
+\b Sizing:\b0  new bear_call positions at one-third of comparable bull_put dollar risk until at least 10 live/paper cycles validate. Expect H1 filter to fire on roughly 4% of trading days \'97 bear_call is an occasional trade, not a persistent book.\
+\
+\b Rolling:\b0  do NOT roll bear_call positions. Tested as H3 and falsified \'97 rolling compounds losses in persistent bulls. Hold to expiry per management rules.\
+\
+\b What we cannot do\b0\
+\
+\'95  Algorithmically switch from bull_put to bear_call based on any single signal or signal combination\
+\'95  Pre-position bear_call ahead of a suspected downturn \'97 wrong-footedness on the 40% of crashes that come without warning will exceed the edge on the 60% that do\
+\'95  Use an overbought condition as a risk signal \'97 the data says strong bull runs statistically predict continued calm\
+\
+\b What we accept\b0\
+\
+\'95  Some bear regimes will drop a bull_put-heavy book into a meaningful drawdown before any signal fires. This is a cost of participating in the bull_put edge. Sizing discipline (caps on total bull_put dollar risk, diversification across the 12-name shortlist) is the primary defense, not regime prediction.\
+\'95  Dec 2018 and Volmageddon 2018 both occurred from 10+ weeks of stable positive VRP with SPY trending well above its 50dma. No signal in our tested set warned of either event. These "boom from tranquility" events are irreducible surprises; defined-risk structure is the only defense.\
+\'95  Entering bear_call at a bear onset may give up real edge if the bear proves sustained (like 2022). This is a deliberate trade-off \'97 we prefer missing some bear-onset edge over being wrong-footed by the 65% of bear weeks that resolve with a rally.\
+\
+
+\f0\b\fs28 Regime Transition\
+\
+\f1\b0\fs24 The Regime Overrides section above specifies what fires WHEN. This section specifies what to DO when triggers fire while you have an existing book. The plan operates on a paper-test 4+ month window with rolling positions across multiple structures \'97 a regime change is a process, not a switch, and the book has to manage itself through it.\
+\
+The 2026-04-25 H1 alignment audit on the SPY ORATS history (2013-2026, 11 discrete bear events) confirmed that H1 is high-precision and moderate-recall. 97.6% of all H1-firing days (across 13 years) fell INSIDE a real bear event. False positives totaled 7 days in the entire sample. Lead time relative to the trough averaged 25-50 trading days on fast bears (2018Q4, COVID, 2022 phases, 2025Q2) and was useless on slow grinds (2018Q1, 2023). The signal is reliable as a confirmation, weak as an early warning.\
+\
+\b Five-stage transition framework\b0\
+\
+\'95  \b Stage 1 \'97 Soft-downsize triggers fire (any of: SPY 252-day IVR > 0.7; SPY within 2% of 200dma trending down; term inverted AND VIX > 20).\b0  \i Action:\i0  cut new bull_put entries to 50% size; pause new ZEBRA entries; permit new IF entries on term-inversion days; bear_call still NOT permitted; existing positions run to their normal exits.\
+\'95  \b Stage 2 \'97 SPY breaks below 200dma but IVR < 0.5.\b0  \i Action:\i0  bull_put hard pause if also term_inv + IVR>0.5; otherwise still 50% size; IF active on term-inversion days; bear_call still NOT permitted (waiting on IVR); ZEBRA held; earnings T1 continues per calendar.\
+\'95  \b Stage 3 \'97 H1 fires (SPY < 200dma AND IVR > 0.5).\b0  \i Action:\i0  bear_call permitted on the 6-name cohort (SPX, SPY, QQQ, DIA, IWM, WMT); bull_put new entries paused if hard-pause also active; IF continues; ZEBRA held; earnings T1 unchanged. \b Critical: do not deploy bear_call on any name where you have an open bull_put on the same monthly OpEx expiration.\b0  Bull_put + bear_call on the same name same expiration = an iron condor, which we tested and rejected.\
+\'95  \b Stage 4 \'97 Decline plays out toward trough.\b0  \i Action:\i0  bull_put MTM-1x roll triggers on rollable names (SPX, SPY, QQQ, DIA, WMT, TLT, VNQ); names not on the roll list (XLU, IYR, XLV, KO) hold to expiry and absorb the loss per defined-risk sizing; bear_call positions opened at Stage 3 manage to their exits; IF positions likely hit 50%-profit-target; ZEBRA approaches max loss on names where spot falls below the long-call strike (~13-21% below entry on Tier 1).\
+\'95  \b Stage 5 \'97 Recovery (H1 false-positive zone).\b0  \i Action:\i0  bear_call new entries STOP when SPY closes back above its 200dma. Do not rely on H1 turning off \'97 H1 fires on 19-75% of recovery days because price stays below 200dma well after IVR has compressed. Bull_put and ZEBRA remain in their soft-downsize cadence until BOTH conditions clear (SPY > 200dma AND IVR < 0.5). RSI-14 bullish divergence (validated +4.71% fwd 25-day return) is a candidate confirmation for resuming full-size bull_put deployment but is not yet promoted in the plan; treat as a soft "regime stabilizing" tell, not a deploy trigger.\
+\
+\b Per-name conflict rules\b0\
+\
+The cohort overlap between bull_put and bear_call covers four names (SPY, QQQ, DIA, WMT). When the regime rotates, these four names are where the "accidental iron condor" risk is highest.\
+\
+\'95  \b No bull_put + bear_call on the same name same monthly OpEx expiration.\b0  Wait for the bull_put to close (or roll) before adding bear_call. The bull_put MTM-1x trigger will close most positions naturally during a real bear; non-rollable names hold to expiry, after which the next monthly OpEx is open for bear_call deployment.\
+\'95  \b ZEBRA + bear_call on the same name is undefined, prefer not to layer.\b0  ZEBRA delta is ~+1.0 per contract; adding a 30\uc0\u916  bear_call on the same name reduces net delta to ~+0.70 \'97 a partial trim, not a real hedge. If you want to neutralize ZEBRA delta in a regime change, the right tool is closing or rolling the ZEBRA, not stacking bear_call. Pay friction without buying real protection.\
+\'95  \b ZEBRA + IF on the same name is the natural regime hedge.\b0  ZEBRA is long delta + long gamma; IF is long vega + long gamma (long-vol). In a crash, ZEBRA loses (capped at debit) and IF profits from vol expansion + magnitude. Net: IF leg covers a portion of ZEBRA loss. Not separately tested as a paired book in the v1.6 work, but the structures are aligned and both validated standalone. Treat as a deliberate pairing rule: if ZEBRA is open on a name, an IF entry on the same name + same expiration is encouraged when the IF gate (term inversion) fires.\
+\'95  \b Earnings T1 cohort runs independent of the transition.\b0  The earnings cohort (GOOGL, NUE, META, KO, WFC, RRC, SCCO, CNQ + INTC bear_call + PLTR IF) operates per the per-name calendar; directional bias is name-specific not regime-driven. Continue per the plan even during Stages 1-5.\
+\
+\b Timing reality and what the plan accepts\b0\
+\
+\'95  In the 2018Q4-style fast bear: H1 fires P+5 to P+21 days after the peak, T-25 to T-50 days before the trough. Useful warning. Stages 1\'963 unfold in compressed time (often within a single OpEx cycle). Bear_call deployment lands in the productive window.\
+\'95  In the COVID-style flash crash: H1 fires P+8 days but T-25 days. Bear_call deployment is reactive, not predictive \'97 you're capturing the ongoing-vol harvest, not the move itself. Sizing has to respect the possibility that you're entering near the trough.\
+\'95  In the 2022-style secular bear: H1 fires multiple times across a 9-month decline (events 7, 8, 9 in the alignment audit). Repeated bear_call deployments. Bull_put rolls multiple times on rollable names. ZEBRA exposure ages out over the 75-DTE cycle and reopens at lower spot \'97 effectively averages into the bear floor.\
+\'95  In a 2018Q1 / 2023-style slow grind: H1 fires only at the trough, on 2-3% of decline days. Bear_call is essentially absent. The plan accepts this loss of edge in slow grinds \'97 attempting to deploy bear_call without H1 confirmation has been tested (Phase 2h baseline) and loses money.\
+\'95  In the recovery: H1 false-positives last 1-3 months past the trough. The Stage 5 SPY-above-200dma cutoff is the workaround \'97 simpler and more conservative than waiting for H1 to disengage.\
+\
+\b Daily regime-state tracking (operational)\b0\
+\
+The 9:20 ET research-cohort capture cron (research_cohort_snapshot.py) is extended in v1.7 to compute and persist the regime stage daily into a new regime_state table in metal_project.db. The cycle qualifier (build window 2026-05-01 to 2026-05-04) reads this state to populate the per-symbol GO/PAUSE/DOWNSIZE grid before each entry day. Operationally, the user does not need to recompute regime state at deployment time \'97 the daily state is available, dated, and auditable.\
+\
+\b What this section does NOT do\b0\
+\
+\'95  Force-close existing positions on any signal. Existing positions run to their structure-specific exit rules. Regime transition affects NEW entries and SIZING, not forced closures of in-flight cycles.\
+\'95  Add a "panic mode" override. There is no rule in the plan for closing an entire book on a single signal. The structural sizing rules (max-loss caps, ZEBRA capital outlay caps) carry the tail-risk discipline; regime transition adjusts the entry mix without touching the existing book.\
+\'95  Specify a hedging ratio. The IF + ZEBRA pairing is a directional pairing, not a delta-neutral hedge. The book remains net-directional; regime transition adjusts net direction over a 4-8 week period as old positions close and new positions of opposite tilt come on.\
+\
+
+\f0\b\fs28 What Doesn\'92t Work (Caveats for bull_put and bear_call)\
+
+\f1\b0\fs24 Each item below has been tested and found null or negative. This section exists so future iterations of the plan do not re-derive empirically falsified ideas.\
+\
+\b MP anchoring for bear_call\b0\
+\
+\'95  MP-anchored bear_call at T-5 held to expiry does NOT lift over 30-delta (Phase 2c). MP-anchoring helps puts, not calls. The asymmetry is load-bearing.\
+\'95  Aggressive ITM MP-anchored bear_call (spot > MP entry) fails standalone across 2,686 cycles. Cohort mean -$0.087 per cycle, 21.7% win rate. Regime-contingent only.\
+\
+\b Entry filters\b0\
+\
+\'95  Live-book signature (IV rank >= 0.7 + VRP > 0 + ITM short delta) does NOT lift Phase 2h baseline. Tighter thresholds make results worse.\
+\'95  Mean-reverter cohort (CNC, TJX, NEE, T, GILD, PFE, MSFT, VZ, RIO) does NOT transfer to bear_call edge on 5-day OpEx trades. Mean-reverter cohort is actually worse than pinner cohort.\
+\'95  Overbought signals (SPY > +10% over 200dma) are DIS-informative \'97 9.7% crash rate, 0.63x lift. Strong bull runs statistically predict continued calm.\
+\'95  Single-feature quintile cuts on entry features (cushion, credit, IV) are non-monotonic. No feature ordering predicts cycle outcome.\
+\
+\b Stops and management\b0\
+\
+\'95  T-3 exit rule hurts 7 of 8 premium-seller structures. Theta harvest lives in the final 2 days.\
+\'95  MTM-based mid-cycle stop (close if MTM <= 0 on Tuesday) \'97 76.8% of red-Tuesday cycles recover by expiry.\
+\'95  Spot-based stops on short puts crystallize losses that would have reverted. Short puts mean-revert intraweek at OpEx.\
+\'95  Signal filter (contango + VRP > 0) applied at a roll trigger day destroys edge. It is an entry filter, not a roll filter.\
+\
+\b Timing and regime signals\b0\
+\
+\'95  Daily IV-HV crossovers are too noisy for standalone use.\
+\'95  Weekly IV-HV crossovers provide only modest lift (<=1.1x bull persistence) and miss Dec 2018 and Volmageddon entirely.\
+\'95  No single signal (or tested composite) reliably predicts all tested downturns. Two of five came from stable positive VRP with no advance warning.\
+\'95  "Boom from tranquility" events are irreducible surprises. Defined-risk structure is the only defense.\
+\
+\b Trend-change signals (tested 2026-04-24)\b0\
+\
+\'95  \b Elevated 25-delta put-call skew is DIS-informative as a sell signal on SPY.\b0  Elevated skew (top 20% of 252-day rank) precedes fwd 25-day return of +2.62% vs +1.19% baseline. Fear-is-bullish: when everyone is paying up for puts they are already hedged, and the market tends to mean-revert upward from those moments. Do not add skew to downsize triggers.\
+\'95  \b RSI-14 bearish divergence (SPY at 20d high, RSI not) is DIS-informative as a sell signal.\b0  Probability of forward 25-day drawdown > -5% is 12.2% after bearish divergence vs 17.4% baseline \'97 the "trend exhaustion" interpretation fails on SPY. Do not add it to downsize triggers.\
+\'95  \b RSI-14 bullish divergence (SPY at 20d low, RSI not) DOES work.\b0  Forward 25-day return +4.71% vs +1.24% baseline (~4x lift). Asymmetric: RSI divergence as a BUY signal from oversold conditions is real; as a SELL signal from overbought conditions, it is not. Candidate bull_put entry confirmation pending further testing.\
+\'95  \b Mag 4 (AAPL/MSFT/META/TSLA) equal-weight vs SPY divergence:\b0  modest negative effect (fwd 25d ret +0.79% vs +1.41% baseline, N=109) but thin sample and short window (only 4.5 years of co-listed data). Not conclusive; full Mag 7 test deferred until AMZN/GOOGL/NVDA ORATS data is ingested.\
+\'95  \b "Tired bull" or "overbought market" is a narrative claim, not a measurable one.\b0  No signal in our test set can quantify regime runway. Do not size down based on subjective overbought reads.\
+\
+\b Pin-mechanic claims\b0\
+\
+\'95  Max pain is not a causal attractor at T-5 entry. Price does not move toward MP more than secular drift predicts.\
+\'95  Pin-break detection framework is premise-weakened for monthly OpEx. May still apply to intraday expiration dynamics but not to 5-day directional bets.\
+\
+\b Inverted fly management variants (tested 2026-04-24)\b0\
+\
+\'95  \b 21-DTE time stop (first-trigger managed exit) on inverted_fly DESTROYS the edge.\b0  Universe-wide 50%-only exit is +$0.191/cycle; first-trigger (50% or 21-DTE, whichever fires first) drops to \'96$0.004. Long-vol payoffs concentrate in the final two weeks; a time stop cuts before payoff. 50%-only is the canonical exit.\
+\'95  \b Rolling at dte_21 loss check-point for inverted_fly does NOT recover edge.\b0  Tested via a proxy: if P&L at dte_21 >= 50% of debit lost, close and re-open on next monthly OpEx. Full cohort combined lift: +$0.005/cycle (noise). Tighter thresholds (75%, 100% debit lost) give negative lift. Rolling after a mid-cycle loss does not pay.\
+\'95  \b Stop-loss at dte_21 loss check-point HURTS inverted_fly.\b0  Full cohort lift \'96$0.005/cycle at 50%-debit threshold; near-zero at tighter thresholds. Cutting losers also crystallizes temporary losses that would have reverted by expiration. Same mechanism as the Phase 2f bull_put spot-stop finding. Caveat: this tests one mid-cycle check-point, not a true daily-marks stop. A daily-marks stop remains untested but unlikely to rescue given the directional finding.\
+\'95  \b Near-OpEx (T-5) entry for inverted_fly FAILS.\b0  Mean +$0.041/cycle vs 45-DTE +$0.191; 5\'d7 weaker. Additionally the term-inversion gate that LIFTS 45-DTE entry actively HURTS at T-5 (\'96$0.190/cycle). Same signal, opposite effect based on time-to-expiration. Do not use T-5 entry for IF.\
+\
+
+\f0\b\fs28 Current Active Trades\
+
+\f1\b0\fs24 \b Book snapshot as of 2026-04-24 (all positions for 2026-05-15 OpEx, DTE = 22)\b0\
+\
+\'95  37 bear_call verticals: $125.29 total credit collected, +$25.14 unrealized P&L (23 green / 11 red / 3 newly opened, unmarked)\
+\'95  25 bull_put verticals: $45.56 total credit collected, -$1.80 unrealized P&L (15 green / 8 red / 2 newly opened, unmarked)\
+\'95  16 underlyings carry both legs (AR, AXP, CRM, CSCO, CVS, FCX, GM, INTU, PFE, PG, USB, VZ, XLE, XLF, XLP, XLU) \'97 forming iron-condor-like combined positions across multiple entry dates\
+\
+\b Selection rationale (from spread_score_tracker)\b0\
+\
+Positions were selected by the spread_score engine using an entry signature roughly characterized as:\
+\
+\'95  Elevated IV rank (252-day) \'97 median ~0.75, range 0.47 to 1.00\
+\'95  Positive VRP at entry (implied above realized) \'97 median ~+0.06\
+\'95  Aggressive ITM short delta for bear_calls \'97 0.47 to 0.89\
+\'95  A proprietary composite score in the 0.45 to 0.55 range\
+\
+The theoretical case: elevated IV + positive VRP indicates the market paying up for insurance that recent realized vol does not justify. Selling a high-credit ITM bear_call in that environment is a bet that IV crush delivers early theta and spot mean-reverts toward or below the short strike before expiry.\
+\
+\b Luck or signal? \'97 tested\b0\
+\
+The selection signature was tested against the 2,686-cycle Phase 2h aggressive bear_call_mp backtest. The result is null: the signature does NOT lift the cohort baseline.\
+\
+\'95  Baseline (all Phase 2h cycles): mean -$0.087 per cycle, 21.7% win rate\
+\'95  IV rank >= 0.7: mean -$0.108, 16.8% win \'97 \i worse\i0  than baseline\
+\'95  IV rank >= 0.7 AND VRP > 0: mean -$0.230, 16.2% win \'97 \i worse\i0\
+\'95  IV rank >= 0.7 AND spot extension 2-10% above MP: mean -$0.280, 14.3% win \'97 \i worse\i0\
+\'95  IV rank quintiles Q1 through Q5: mean approximately -$0.09 across all five quintiles, flat\
+\
+The current +$25 unrealized P&L on the bear_call book is most likely normal mid-cycle theta decay at DTE=22, not a tradeable signature. The T-3 exit study showed cycles that finish profitable carry \i negative\i0  mean MTM through DTE=3 and only turn green in the final two trading days. Mid-cycle green at DTE=22 has essentially no predictive value for cycle-end outcome.\
+\
+\b Expected cycle-end outcome if backtest prior holds\b0\
+\
+\'95  Bear_calls: roughly 8 of 37 finish profitable (21.7% \'d7 37 = 8.0)\
+\'95  Bull_puts: roughly 11 of 25 finish profitable (45% \'d7 25 = 11.3) under current mixed regime\
+\'95  Mid-cycle marks should be expected to revert substantially into cycle close\
+\
+\b Disposition\b0\
+\
+\'95  Hold to expiry or per Window A / Window B management rules (first-trigger 50% of max profit or DTE <= 21). Do NOT close early on backtest result alone \'97 the result informs future selection, not existing exits.\
+\'95  Do NOT add new aggressive ITM bear_calls based on the observed mid-cycle greenness. The signature has been tested and does not carry edge.\
+\'95  Log the cycle outcome at May 15 close. At N=1 cycle, the outcome (good or bad) is a single data point against the 2,686-cycle backtest prior; it cannot confirm or falsify the cohort finding.\
+\
+\b Bear_call verticals (37)\b0\
+\
+\'95  AR 40/42 (w2), credit $0.47, entered 2026-04-16\
+\'95  AR 37/38 (w1), credit $0.50, entered 2026-04-21\
+\'95  AXP 320/340 (w20), credit $13.05, entered 2026-04-17\
+\'95  B 42/44 (w2), credit $0.91, entered 2026-04-16\
+\'95  CL 85/90 (w5), credit $1.90, entered 2026-04-17\
+\'95  CRM 185/195 (w10), credit $3.80, entered 2026-04-17\
+\'95  CRM 190/195 (w5), credit $1.98, entered 2026-04-21\
+\'95  CSCO 77.5/82.5 (w5), credit $3.10, entered 2026-04-16\
+\'95  CSCO 80/85 (w5), credit $3.80, entered 2026-04-20\
+\'95  CVI 30/35 (w5), credit $2.02, entered 2026-04-21\
+\'95  CVS 75/80 (w5), credit $1.79, entered 2026-04-16\
+\'95  EEM 58.5/59.5 (w1), credit $0.83, entered 2026-04-17\
+\'95  EEM 59/60 (w1), credit $0.80, entered 2026-04-20\
+\'95  EFX 185/195 (w10), credit $6.15, entered 2026-04-17\
+\'95  FCX 65/70 (w5), credit $2.58, entered 2026-04-16\
+\'95  GM 75/80 (w5), credit $2.93, entered 2026-04-16\
+\'95  GM 77.5/82.5 (w5), credit $2.52, entered 2026-04-20\
+\'95  GOOGL 310/320 (w10), credit $7.20, entered 2026-04-16\
+\'95  INTU 400/420 (w20), credit $7.20, entered 2026-04-17\
+\'95  INTU 370/390 (w20), credit $13.90, entered 2026-04-20\
+\'95  IWM 267/269 (w2), credit $1.48, entered 2026-04-23\
+\'95  JPM 305/315 (w10), credit $6.25, entered 2026-04-17\
+\'95  JPM 300/310 (w10), credit $7.68, entered 2026-04-20\
+\'95  KRE 68/70 (w2), credit $1.13, entered 2026-04-16\
+\'95  LOW 240/260 (w20), credit $11.75, entered 2026-04-20\
+\'95  PEP 155/165 (w10), credit $4.62, entered 2026-04-17\
+\'95  PFE 27/29 (w2), credit $0.69, entered 2026-04-16\
+\'95  PG 145/155 (w10), credit $3.82, entered 2026-04-17\
+\'95  URBN 70/75 (w5), credit $3.10, entered 2026-04-21\
+\'95  USB 55/60 (w5), credit $2.27, entered 2026-04-16\
+\'95  USB 57.5/59 (w1.5), credit $0.57, entered 2026-04-23\
+\'95  VZ 47/49 (w2), credit $0.74, entered 2026-04-17\
+\'95  XLE 56.5/57.5 (w1), credit $0.51, entered 2026-04-23\
+\'95  XLF 50/52 (w2), credit $1.63, entered 2026-04-17\
+\'95  XLF 52.5/53.5 (w1), credit $0.52, entered 2026-04-21\
+\'95  XLP 83/85 (w2), credit $0.70, entered 2026-04-17\
+\'95  XLU 46/47 (w1), credit $0.40, entered 2026-04-17\
+\
+\b Bull_put verticals (25)\b0\
+\
+\'95  AR 40/38 (w2), credit $1.62, entered 2026-04-16\
+\'95  AR 39/37 (w2), credit $1.32, entered 2026-04-17\
+\'95  AR 37/35 (w2), credit $0.92, entered 2026-04-20\
+\'95  AXP 327.5/322.5 (w5), credit $3.20, entered 2026-04-23\
+\'95  B 42/40 (w2), credit $0.77, entered 2026-04-16\
+\'95  CL 85/80 (w5), credit $2.60, entered 2026-04-21\
+\'95  CRM 185/175 (w10), credit $4.38, entered 2026-04-17\
+\'95  CRM 190/180 (w10), credit $4.72, entered 2026-04-20\
+\'95  CSCO 77.5/72.5 (w5), credit $0.85, entered 2026-04-16\
+\'95  CVS 75/70 (w5), credit $1.94, entered 2026-04-16\
+\'95  FCX 65/60 (w5), credit $1.24, entered 2026-04-16\
+\'95  GM 75/70 (w5), credit $1.28, entered 2026-04-16\
+\'95  GM 77.5/75 (w2.5), credit $0.90, entered 2026-04-21\
+\'95  GOOGL 310/300 (w10), credit $1.63, entered 2026-04-16\
+\'95  INTU 390/370 (w20), credit $7.95, entered 2026-04-17\
+\'95  KRE 68/66 (w2), credit $0.53, entered 2026-04-16\
+\'95  PFE 27/25 (w2), credit $0.68, entered 2026-04-16\
+\'95  PG 145/140 (w5), credit $2.30, entered 2026-04-21\
+\'95  USB 55/50 (w5), credit $0.92, entered 2026-04-16\
+\'95  USB 57.5/56 (w1.5), credit $0.71, entered 2026-04-23\
+\'95  VZ 47/45 (w2), credit $1.19, entered 2026-04-16\
+\'95  VZ 49/47 (w2), credit $1.34, entered 2026-04-20\
+\'95  XLE 57/55 (w2), credit $1.37, entered 2026-04-17\
+\'95  XLP 83/81 (w2), credit $0.82, entered 2026-04-17\
+\'95  XLU 46/45 (w1), credit $0.38, entered 2026-04-17\
+\
+
+\f0\b\fs28 Glossary\
+
+\f1\b0\fs24 Reference for acronyms, jargon, statistical tests, and project-specific terms used throughout this plan. Organized into five alphabetized buckets. When a term or test name is unfamiliar in any section above, check here first.\
+\
+
+\f0\b\fs26 Market and Options Terminology\
+
+\f1\b0\fs24 \'95  \b ATM (at-the-money) \'97\b0  option whose strike equals (or sits closest to) current underlying spot. ATM options have the highest gamma and roughly 0.5 delta.\
+\'95  \b Bid-ask spread \'97\b0  difference between the best buy price and the best sell price for an option. Wider spreads mean more slippage on entry and exit.\
+\'95  \b Contango (term structure) \'97\b0  front-month implied volatility below back-month IV; the normal resting state of the IV term structure.\
+\'95  \b Credit (credit spread) \'97\b0  position opened for net money received. Bull_put and bear_call verticals are credit spreads.\
+\'95  \b Delta \'97\b0  sensitivity of option price to a $1 move in the underlying. Used as a rough probability of finishing in-the-money (0.30 delta short put \uc0\u8776  30% chance ITM at expiry).\
+\'95  \b DTE (days to expiration) \'97\b0  days remaining until the option expires.\
+\'95  \b Gamma \'97\b0  sensitivity of delta to underlying price. Highest near ATM and near expiration; drives the "short-gamma regime" risk.\
+\'95  \b Implied volatility (IV) \'97\b0  forward-looking volatility priced into the option premium.\
+\'95  \b In-the-money (ITM) \'97\b0  option with intrinsic value; strike is unfavorable for the seller.\
+\'95  \b Inverted term structure \'97\b0  front-month IV above back-month IV. Signals expected forward vol stress.\
+\'95  \b IV crush \'97\b0  rapid collapse of implied volatility, typically after a scheduled event such as earnings.\
+\'95  \b Mark-to-market (MTM) \'97\b0  live P&L of an open position at current mid prices.\
+\'95  \b Max loss \'97\b0  pre-defined worst-case dollar loss on a defined-risk spread (wing width \'d7 100 \'96 entry credit, for equity options).\
+\'95  \b Mid pricing \'97\b0  entry or exit pricing assumed at the bid-ask midpoint. Realistic retail fills usually sit worse than mid \'97 see slip=0.25.\
+\'95  \b OpEx (options expiration) \'97\b0  the monthly third-Friday expiration date. Window B trades are anchored to OpEx.\
+\'95  \b Open interest (OI) \'97\b0  number of outstanding contracts at a strike. High OI is necessary for tight bid-ask and meaningful max-pain computation.\
+\'95  \b Out-of-the-money (OTM) \'97\b0  option with no intrinsic value; strike is favorable for the seller.\
+\'95  \b Premium \'97\b0  price of the option. For credit spreads, the credit received at entry.\
+\'95  \b Realized volatility (RV) \'97\b0  historical volatility from close-to-close returns, annualized. RV20 uses a 20-trading-day window.\
+\'95  \b Short gamma / short-gamma regime \'97\b0  condition where a short-option position loses money rapidly on large moves, worst in the final 1\'962 trading days before expiry.\
+\'95  \b Skew (25\uc0\u916  put-call skew) \'97\b0  difference between OTM put IV and OTM call IV. Elevated skew signals expensive downside hedging.\
+\'95  \b Slippage \'97\b0  execution cost away from mid. This plan uses slip=0.25 as the binding retail-friction assumption in backtests.\
+\'95  \b Spot \'97\b0  current price of the underlying.\
+\'95  \b Strike (K) \'97\b0  the option contract's fixed reference price.\
+\'95  \b T-5 / T-1 / D-8 / D-3 \'97\b0  trading-day offsets from OpEx Friday. T-5 = 5 trading days before OpEx (prior-week Friday). D-3 = 3 trading days before (Tuesday of OpEx week).\
+\'95  \b Tail risk \'97\b0  probability-weighted magnitude of worst-case losses. Defined-risk structures cap tail at max loss; undefined-risk structures (short strangle, naked short) do not.\
+\'95  \b Theta \'97\b0  option's sensitivity to time passing, expressed as dollars lost per day.\
+\'95  \b Theta harvest \'97\b0  premium-selling strategy profiting from daily loss of option extrinsic value.\
+\'95  \b VIX \'97\b0  CBOE implied volatility index; widely-watched measure of SPX 30-day forward implied volatility.\
+\'95  \b Wing (wing width) \'97\b0  dollar distance between the short strike and the long strike of a vertical, or between the short strike and either long wing of a condor or fly.\
+\
+
+\f0\b\fs26 Signals and Metrics\
+
+\f1\b0\fs24 \'95  \b 200-day moving average (200dma) \'97\b0  simple moving average of SPY daily close over 200 trading days. Used as a regime marker.\
+\'95  \b 50-day moving average (50dma) \'97\b0  simple moving average of SPY daily close over 50 trading days. Used for weekly trend-persistence testing.\
+\'95  \b Archetype cluster \'97\b0  k-means cluster assignment from the 2026-04-23 clustering run on 3,992 history-eligible tickers using 11 behavioral features. Cluster labels 0, 1, 2, 4 appear in this plan's universe.\
+\'95  \b Extension above MP \'97\b0  (spot \'96 MP) / MP. Positive = spot above max pain; negative = below. An entry feature in Phase 2h aggressive bear_call_mp.\
+\'95  \b IV rank, 252-day \'97\b0  (current ATM IV30 \'96 252d min) / (252d max \'96 252d min). Range [0, 1]. Thresholds 0.5, 0.7, and 0.9 appear in different gates.\
+\'95  \b Max pain (MP) \'97\b0  argmin over strikes K of \uc0\u8721  cOI(Ks) \'d7 max(0, K \'96 Ks) + pOI(Ks) \'d7 max(0, Ks \'96 K). Computed at T-1 for the pin-reliability scan and at T-5 for entry decisions.\
+\'95  \b Pinner cohort tier \'97\b0  four-tier classification of the universe by historical pin reliability: Tier 1 (credit ETFs, tightest), Tier 2 (major equity indices), Tier 3 (sector ETFs + dividend stalwarts), Tier 4 (excluded).\
+\'95  \b Term spread \'97\b0  front 30-DTE ATM IV minus back 75-DTE ATM IV on SPY. Negative = contango; positive = inverted.\
+\'95  \b Variance ratio (VR) \'97\b0  ratio of long-horizon variance to short-horizon variance. VR > 1 suggests trending; VR < 1 suggests mean-reverting.\
+\'95  \b VRP (volatility risk premium) \'97\b0  ATM IV30 \'96 RV20. Positive = implied prices a cushion over realized; negative = realized exceeds implied.\
+\
+
+\f0\b\fs26 Statistical Tests and Filters\
+
+\f1\b0\fs24 \'95  \b Contango + VRP>0 filter (bull_put entry gate) \'97\b0  Phase 2f pre-registered entry filter. Fires when SPY term spread < 0 AND SPY VRP > 0. Tests whether these joint calm-regime conditions at T-5 entry improve bull_put_mp outcomes. Result: lifts mean from \'96$0.002 to +$0.019/cycle; fires on ~57% of historical T-5 entry days. Symmetric counterpart: when applied to inverted_fly at 45-DTE, this filter ACTIVELY HURTS (lift \'96$0.086/cycle) \'97 the two structures are entry-gate opposites.\
+\'95  \b Term-inversion entry filter (inverted_fly gate) \'97\b0  Phase A IF batch (2026-04-24). Fires when SPY term_spread > 0 (front IV above back IV) at entry. Tests whether pending-vol-event signal lifts long-vol inverted_fly at 45-DTE. Result: lifts universe-wide mean from +$0.191 to +$0.639/cycle, 60.2% win to 66.6% win, N=3,303. Stacking with IVR > 0.5 lifts to +$0.697; stacking with VRP < 0 lifts to +$0.656. VALIDATED. Crucially, the same gate at T-5 near-OpEx entry ACTIVELY HURTS (mean \'96$0.190) \'97 signal has opposite effect based on time-to-expiration.\
+\'95  \b Inverted_fly exit-rule comparison \'97\b0  Phase A IF batch. Tests 50%-only vs managed (first-trigger 50%/21-DTE) vs 21-DTE only exit for long-vol inverted_fly. Result: 50%-only +$0.191/cycle vs managed \'96$0.004/cycle vs 21-DTE only \'96$0.024/cycle. The 21-DTE time stop DESTROYS long-vol edge. 50%-only is the validated exit.\
+\'95  \b Inverted_fly near-OpEx entry test \'97\b0  Phase B IF batch. Tests T-5 near-OpEx entry against the validated 45-DTE entry. Result: mean +$0.041/cycle (5x weaker), negative median, term-inversion gate flips destructive. FALSIFIED. Only 45-DTE entry is validated for inverted_fly.\
+\'95  \b Bull_put + inverted_fly pair book \'97\b0  Phase B IF batch. Tests combined P&L of bull_put (dte_45 managed) + inverted_fly (dte_45, 10% wings, 50%-only exit) on the same (ticker, expiration, entry_date). Result: cluster-2 combined +$0.530/cycle, 56.3% win, median +$0.298, N=5,894. 39 of 57 cluster-2 names positive. Validated two-leg pair structure; SPX is the dollar anchor.\
+\'95  \b H1 bear_call entry filter \'97\b0  pre-registered entry gate tested 2026-04-24. Fires when SPY < 200dma AND SPY 252-day IV rank > 0.5. Tests whether regime-confirmed bear conditions rescue aggressive bear_call_mp from its \'96$0.087 baseline. Result: +$0.092/cycle, 40% win, N=102. VALIDATED \'97 the only bear_call entry gate used in this plan.\
+\'95  \b H3 bear_call rolling test \'97\b0  symmetric counterpart of Phase 2g, tested 2026-04-24. Tests whether up-and-out rolling of triggered bear_call cycles into the next monthly OpEx improves outcomes. Result: FALSIFIED \'97 rolling compounds losses; only 29.6% of rolls improved the outcome.\
+\'95  \b Hard pause trigger (bull_put) \'97\b0  three-condition gate that halts new bull_put entries entirely: SPY below 200dma AND term inverted AND SPY 252-day IV rank > 0.5.\
+\'95  \b Live-book signature test \'97\b0  post-hoc test (2026-04-24) of the current live book's observed entry signature (IV rank \uc0\u8805  0.7 + VRP > 0 + ITM short delta) against the 2,686-cycle Phase 2h backtest. Result: NULL. The signature does not lift baseline; observed mid-cycle profit is theta noise at DTE=22.\
+\'95  \b Managed exit (first-trigger 50% / 21-DTE) \'97\b0  TastyTrade-style exit rule: close at the first of (50% of max profit reached) or (DTE \uc0\u8804  21). Applied to Window A bull_put and bear_call.\
+\'95  \b Mean-reverter cohort filter \'97\b0  Phase 2h sub-test. Applies bear_call_mp only to a 13-name mean-reverter cohort. Result: FAILED \'97 mean-reverters are worse than pinners for this structure.\
+\'95  \b MTM-1x roll trigger (T2) \'97\b0  Phase 2g roll trigger: fire when mark-to-market loss \uc0\u8805  1\'d7 entry credit. Fires on 34.3% of bull_put_mp cycles. Dominates the spot-breach trigger (T1).\
+\'95  \b Phase 1: pin reliability scan \'97\b0  19,400-cycle 13-year scan measuring median |close \'96 MP| / close and fraction of cycles within 1% of MP per ticker. Produces the four-tier pinner cohort.\
+\'95  \b Phase 2c: MP-anchored structures, T-5 entry, held to expiry \'97\b0  tests whether short-strike placement nearest max pain at T-5 outperforms 30-delta for each structure. Result: bull_put_mp +$0.072/cycle, 87% win (first positive MP-flavored finding); bear_call shows no lift \'97 load-bearing asymmetry.\
+\'95  \b Phase 2f: bull_put_mp rescue \'97\b0  three rescue interventions tested on bull_put_mp. Only signal-driven entry (contango + VRP>0) works; entry-feature filters and spot-based stops fail.\
+\'95  \b Phase 2g: roll-to-save bull_put_mp \'97\b0  tests three triggers \'d7 two roll styles \'d7 signal gate on/off. Winning combination: T2_mtm trigger \'d7 down-and-out roll. Flips cohort mean from \'96$0.002 to +$0.014/cycle. Signal gate at trigger day HURTS.\
+\'95  \b Phase 2h: aggressive ITM bear_call_mp \'97\b0  tests bear_call with spot above MP at entry and short call at the MP strike (ITM). Across 2,686 cycles: mean \'96$0.087/cycle, 21.7% win rate. FAILED standalone; regime-contingent only.\
+\'95  \b Phase 2i: regime detector (planned, not run) \'97\b0  proposed multi-factor gate (VIX level, breadth, credit spreads, yield curve) for refining bear_call sizing beyond H1. Low priority given H1 is validated.\
+\'95  \b Regime window tests \'97\b0  side-by-side bull_put vs bear_call tests in five backtested bear windows: COVID 2020, 2022 bear, December 2018, August 2015, Volmageddon 2018. Confirm clean sign-flipping symmetry.\
+\'95  \b RSI-14 bearish divergence test \'97\b0  pre-registered test of SPY at 20-day high while RSI-14 is NOT at 20-day high. Result: DIS-informative as a sell signal (12.2% forward drawdown probability vs 17.4% baseline).\
+\'95  \b RSI-14 bullish divergence test \'97\b0  tests SPY at 20-day low while RSI-14 is NOT at 20-day low. Result: +4.71% forward 25-day return vs +1.24% baseline (~4\'d7 lift). Candidate bull_put entry confirmation; not yet promoted.\
+\'95  \b Skew-as-sell-signal test \'97\b0  tests whether elevated 25\uc0\u916  put-call skew (top 20% of 252-day rank) precedes negative forward returns. Result: DIS-informative. Elevated skew precedes +2.62% 25-day return vs +1.19% baseline \'97 fear-is-bullish.\
+\'95  \b Soft-downsize triggers (bull_put) \'97\b0  three individual conditions, any of which halves new bull_put entry size: SPY 252-day IV rank > 0.7, SPY within 2% of 200dma from above trending down, term inverted AND VIX > 20.\
+\'95  \b Spot-based stop test \'97\b0  Phase 2f sub-test. Close bull_put_mp if spot closes at or below the short strike intraweek. Result: HURTS (\'96$0.019 vs \'96$0.002 baseline). Short puts mean-revert enough that intraweek breach is not a reliable kill signal.\
+\'95  \b T-3 exit rule test \'97\b0  tests whether exiting premium-seller structures 3 trading days before OpEx improves P&L. Result: HURTS 7 of 8 structures. Theta harvest lives in the final 2 trading days.\
+\'95  \b T1 (Earnings \'97 bull put on bias-up) \'97\b0  pre-registered 2026-04-25; tested same day. Open a defined-risk bull put credit spread at T-3 close on names with \uc0\u8805 60% historical positive earnings rate, held to next monthly OpEx expiration. Validated at slip=0.50 with mean +$0.245/cycle, 82% win, lift +$0.289 over non-earnings control, p=0.005, N=175. Promoted to active book.\
+\'95  \b T2 (Earnings \'97 bear call on bias-down) \'97\b0  symmetric counterpart of T1 on names with \uc0\u8804 40% historical positive earnings rate. Lift over control is real (+$0.188, p=0.016) but absolute mean \uc0\u8776  $0 at slip=0.50. Not promoted at cohort level. INTC carved out as a single-name positive.\
+\'95  \b T3 (Earnings non-earnings control) \'97\b0  comparison cohort for T1, T2, T4. For each cohort ticker, sample 5\'d7 as many random non-earnings trading days in the same date range, \'b110-trading-day buffer around real earnings events, and run identical entry/exit logic. The lift = earnings_mean \'96 control_mean.\
+\'95  \b T4 (Earnings \'97 inverted fly on high-vol bias-ambiguous) \'97\b0  long-vol structure on names with high std but no strong directional bias. Cohort inconclusive at slip=0.50 (p=0.53). PLTR single-name validated standalone: +$0.82 mean, 82% win, +$0.83 lift, T-3 entry, held to monthly OpEx.\
+\'95  \b ZEBRA backtest \'97\b0  pre-registered 2026-04-25 (docs/ZEBRA_PREREG.md). 4,064 cycles at slip=0.50 across the 36-name v1.5 cohort, 75-DTE entry held to expiration. All four pre-reg hypotheses pass: extrinsic-rule fire rate ~95% (H1), flat-day MTM mean +$0.58/day with no theta drag (H2), median upside capture 1.152 (H3 \'97 ZEBRA actually beats long stock by 15% on upside cycles), capital efficiency 0.21 (H4 \'97 debit is 21% of stock cost). Walk-forward validates on 13 of 13 top names. Promoted into the plan at v1.6.\
+\'95  \b Jade Lizard backtest (NOT PROMOTED) \'97\b0  pre-registered 2026-04-25. 5,110 matched cycles vs BP+BC baseline. Backtest passes 5 of 6 gates (managed-exit lift +$0.53/cycle vs baseline, p=0.002, walk-forward validates on 8 of 9 top names) but fails the defined-risk policy gate due to the naked short put leg. Stop-loss test (2026-04-25 addendum) confirms stops do not save the strategy: gap risk on bloodbath cycles eats most of the savings, and false triggers destroy wins on cycles that would have recovered. Verdict: NOT promoted; trading plan stays at v1.5 for credit-spread book. Detail: project_jade_lizard_findings.md.\
+\'95  \b Term-inversion-as-bear_call-entry test \'97\b0  sub-test under H1. Tests whether adding "term inverted" to SPY<200dma + IVR>0.5 improves bear_call. Result: DIS-informative. Adding term inversion drops mean to \'96$0.152/cycle.\
+\'95  \b VRP + term-structure magnitude signal \'97\b0  tests whether joint low-VRP + inverted-term-structure days predict elevated 45-day realized-move probability. Result: 4\'d7 lift on P(|return| \uc0\u8805  10%) over 45 days. Used for long-vol structure timing, not short-premium entry.\
+\'95  \b Weekly IV-HV + trend persistence test \'97\b0  tests whether weekly-aggregated VRP stability plus SPY regime (> or < 50dma) predicts 5-week forward trend persistence. Result: asymmetric \'97 bull trends persist 75% of windows, bear trends only 35%. Informs bear_call deployment discipline.\
+\
+
+\f0\b\fs26 Structures\
+
+\f1\b0\fs24 \'95  \b Bear call vertical \'97\b0  short call at a lower strike + long call at a higher strike, same expiration. Credit received. Profits if the underlying stays below the short strike.\
+\'95  \b Bull put vertical \'97\b0  short put at a higher strike + long put at a lower strike, same expiration. Credit received. Profits if the underlying stays above the short strike.\
+\'95  \b Covered call \'97\b0  long 100 shares of underlying + short 1 call. Generates income from the call premium at the cost of capping upside. Relevant to the queued earnings-plays track.\
+\'95  \b Inverted fly \'97\b0  four-leg defined-risk long-volatility structure: long 1 ATM call + long 1 ATM put (straddle body) + short 1 OTM call + short 1 OTM put (short wings). Net debit at entry. Profits on large underlying moves in either direction past the short strikes; max loss = entry debit (realized if underlying pins at ATM). Canonical wing width in this plan: 10% of spot on each side. Opposite regime from the short-premium structures \'97 pays when vol expands.\
+\'95  \b Iron condor \'97\b0  bull put vertical + bear call vertical on the same expiration and underlying. Profits if underlying finishes between the two short strikes.\
+\'95  \b Iron fly (iron butterfly) \'97\b0  iron condor with the two short strikes equal (typically ATM). Higher credit, narrower profit zone.\
+\'95  \b Short strangle \'97\b0  short put at a lower strike + short call at a higher strike, same expiration. Undefined-risk structure; premium collected on both wings.\
+\'95  \b Straddle \'97\b0  long put + long call at the same strike (typically ATM). A long-vol structure profiting on magnitude.\
+\'95  \b Vertical \'97\b0  generic term for a spread combining one short leg and one long leg of the same type (both calls or both puts) on the same expiration.\
+\'95  \b ZEBRA (Zero Extrinsic Back Ratio) \'97\b0  3-contract single-underlying structure: buy 2\'d7 ITM call at ~70\uc0\u916  + sell 1\'d7 ATM call at ~50\uc0\u916 . Same expiration. Net debit at entry; max loss = the debit (defined risk). Long-stock-equivalent payoff at expiry with slight delta leverage (entry net delta ~+0.90 to +1.15) and positive gamma. Designed to replicate stock exposure without time decay: when extrinsic_short \uc0\u8805  2\'d7 extrinsic_long_total at entry, net theta is zero or positive.\
+\
+
+\f0\b\fs26 Project and Research Terms\
+
+\f1\b0\fs24 \'95  \b AUDIT.md \'97\b0  five-tier feature scorecard at ~/Metal_Project/AUDIT.md. Governs what migrates from Metal_Project into MaxPain_Project.\
+\'95  \b Backtest v1 / v2 \'97\b0  Track A backtest engine versions. v1 used fixed $1 wings (too narrow for SPY-type names); v2 scaled wings to 0.25%/0.5% of spot with mid pricing.\
+\'95  \b bull_put_mp / bear_call_mp \'97\b0  MP-anchored variants of the vertical structures: short strike placed nearest max pain at T-5 entry.\
+\'95  \b Down-and-out roll \'97\b0  roll style that reopens at the new MP strike on the new chain. Beats straight-out in Phase 2g bull_put rolling.\
+\'95  \b MaxPain_Project \'97\b0  new project home at ~/MaxPain_Project/ (scaffold created 2026-04-17). Migration target for the trading system.\
+\'95  \b Metal_Project \'97\b0  original project home at ~/Metal_Project/. Live DB and existing Streamlit dashboards remain there during the audit and bake-off.\
+\'95  \b ORATS \'97\b0  options historical data vendor. Provides the 13-year chain history used for backtests.\
+\'95  \b Paper-test window \'97\b0  paper-only discipline period through approximately 2026-08-19. No live capital committed before that date regardless of results.\
+\'95  \b slip=0.25 \'97\b0  backtest friction assumption: \'bc of the bid-ask half-spread of slippage on each leg. Represents realistic retail fill quality \'97 edge that disappears at slip=0.25 is not edge.\
+\'95  \b Straight-out roll \'97\b0  roll style that keeps the original short strike on the new expiration. Inferior to down-and-out for bull_put rolling.\
+\'95  \b Synthetic non-earnings control \'97\b0  per-ticker random sample of trading days in the same date range as the real earnings events, with a \'b110-trading-day buffer to ensure no overlap. Used to compute the lift_vs_control statistic for any earnings-aligned trade rule. Sample ratio: 5\'d7 the real-event count per ticker. Defined and first used in the T3 pre-registration.\
+\'95  \b Track A / Track B \'97\b0  backtest scope. Track A covers OpEx-window premium-seller structures on the 150-universe; Track B reserved for earnings plays (pending data).\
+\'95  \b Universe v1 \'97\b0  frozen 150-symbol list at ~/MaxPain_Project/data/profile/universe_v1.parquet, dated 2026-04-23. Does not change during the paper-test window.\
+\'95  \b Window A \'97\b0  45-DTE managed entry window. Managed exit: first trigger of 50% max profit or DTE \uc0\u8804  21.\
+\'95  \b Window B \'97\b0  near-OpEx theta harvest window. Enter T-5; exit per structure (bull_put_mp held to expiration).\
+\
+
+\f0\b\fs28 Revision Log\
+
+\f1\b0\fs24 \
+\b v1.1 \'97 2026-04-24 audit corrections\b0\
+\
+Eleven audit edits made against v1.0 in the same session it was produced. All changes are internal consistency or evidence-alignment fixes; no new research findings.\
+\
+\'95  Fixed bear_call bear-regime expected outcomes: win rate corrected from "60-64% on broad indices" to 43-52% per the regime symmetry memo (project_regime_signals_symmetry.md). Mean range tightened from "+$0.07 to +$0.24" to "+$0.10 to +$0.21" to match backtested per-regime means.\
+\'95  Fixed bull_put shortlist outcomes: mean floor corrected from "+$0.04" to "+$0.01" (HYG is +$0.012) and win floor from 70% to 73% per project_per_symbol_bullput_shortlist.md.\
+\'95  Resolved Window B definition contradiction: "Enter D-8, exit D-3" general blurb replaced with "Enter T-5, exit per structure spec" to match the validated bull_put_mp Window B spec of T-5 held to expiration. The T-3 exit rule is noted as tested and failing for 7 of 8 premium-seller structures. Iron fly / iron condor / strangle Window B exit specs remain pending.\
+\'95  Tightened "57% of trading days qualify" to "~57% of historical T-5 entry days (742 of 1,307 cycles in Phase 2f)" to accurately represent the entry-day-specific filter firing rate.\
+\'95  Standardized IV-rank phrasing to "SPY 252-day IV rank" across the soft-downsize trigger, hard-pause trigger, and H1 bear_call gate so readers can implement rules unambiguously.\
+\'95  Added ticker MP (Mountain Pass) back to the Tier 4 excluded list with a note clarifying it is the ticker, not the max-pain abbreviation used elsewhere.\
+\'95  Added first-pass caveat to Position Sizing: the specific percentages (1.5%, 0.5%, 3%, 40%, SPX 3x, 15% book-wide) are asserted conservative defaults for a new system, not derived from a tested sizing study. Revisit as live/paper experience accumulates.\
+\'95  Added "Pending investigations" block to the Bull Put section listing RSI-14 bullish divergence as candidate entry confirmation (+4.71% fwd 25d return vs +1.24% baseline) and the full Mag 7 breadth-divergence test as deferred until AMZN/GOOGL/NVDA data is ingested.\
+\'95  Added "Paper-test falsification and promotion criteria" to the Primary Trading Windows section specifying minimum closed cycles, aggregate P&L thresholds, and rewrite triggers at the 2026-08-19 gate. Explicitly names the failure mode of rolling the window forward instead of rewriting.\
+\'95  Added "Signal Definitions" section (formerly empty "Signals" placeholder) with computational formulas for VRP, term spread, 252-day IV rank, 200dma / 50dma, max pain, and extension above MP.\
+\'95  Added "Deliberate asymmetry" note to the Regime Overrides bear_call gate explaining why the bull_put pause trigger requires term inversion but the bear_call deploy gate does not \'97 evidence-driven, not a logical inconsistency.\
+\
+\b v1.2 \'97 2026-04-24 Glossary added\b0\
+\
+Added a Glossary section before the Revision Log, organized into five alphabetized buckets: Market and Options Terminology, Signals and Metrics, Statistical Tests and Filters, Structures, and Project and Research Terms. The Statistical Tests bucket names each pre-registered filter and test run to date (H1, H3, Phase 1, Phase 2c/2f/2g/2h, regime windows, RSI divergence tests, skew test, weekly persistence, etc.) and states what each one tests and the result (validated, falsified, or null). Definitions are concise; readers looking for formulas should check the Signal Definitions section earlier in the plan. Glossary should be expanded when new terms or tests enter the plan \'97 notably at the iron condor / iron fly / strangle / inverted fly sections planned for later sessions.\
+\
+\b v1.3 \'97 2026-04-24 Iron condor and iron fly rejected; Inverted Fly section added\b0\
+\
+Three structures decided in this revision: iron condor REJECTED, iron fly REJECTED, and Inverted Fly ADDED with a full 8-block section based on Phase A + Phase B backtest findings.\
+\
+\'95  \b Iron condor rejected.\b0  Tested via Phase 2j (contango + VRP>0 entry filter, lifted cohort mean only +$0.005/cycle, noise) and a Phase A batch (7 filter/decomposition tests; A2 low-RV gate was the best single filter at +$0.017 lift but filtered mean still \'96$0.058; cluster 4 and commodity-flow exclusions HURT rather than help; walk-forward killed EEM, HAL was period-specific, only HYG held up). Structural argument: iron condor = bull_put + bear_call on the same name; bull_put +$0.04 + bear_call \'96$0.10 in non-crash + \'96$0.015 extra 4-leg friction = ~\'96$0.075 predicted IC baseline, which matches the observed \'96$0.075. No residual "IC edge" to discover. Detail memories: project_ic_rejected_verdict.md, project_ic_phase2j_signal_filter.md, project_ic_phase_a_batch_findings.md.\
+\'95  \b Iron fly rejected.\b0  Iron fly is iron condor with both short strikes at ATM \'97 strictly narrower profit zone, same 4-leg friction, therefore strictly worse than IC. Backtest confirms: zero positive names across 150 at slip=0.25 managed; managed rule actively hurts vs held-to-rule. MP-anchored iron_fly_mp at narrow \'b11 spacing also flat (best cell KO +$0.027, noise). Wider wings rejected by user for the same reason wider IC wings were rejected \'97 larger potential loss without changing the structural problem. Detail memory: project_iron_fly_rejected_verdict.md.\
+\'95  \b Inverted Fly section added.\b0  Full 8-block section between Bear Call Vertical and Earnings Plays, describing validated entry rule (45-DTE), exit rule (50%-only, NO 21-DTE time stop), entry gate (SPY term_spread > 0, optionally stacked with IV rank > 0.5 or VRP < 0), wing width (10% of spot), two deployment modes (pair with bull_put on SPX-anchored cluster-2 basket; standalone on TSLA/AMD/CAR/META/BABA), rejected variants (near-OpEx T-5 entry), pair losers (XBI/TLT/XOP/IYR), IV-trap and vol-toy exclusions, macro context (Dec 2018 is best tested bear window; Volmageddon is the failure regime), and pending investigations (rolling, stop-loss, universe expansion). Scope lines updated in Management & Exit and Position Sizing. Glossary "Inverted fly" entry refined to describe actual leg composition. Statistical Tests glossary gained four new entries (term-inversion filter, exit-rule comparison, near-OpEx entry test, BP+IF pair book). Detail memories: project_if_phase_a_batch_findings.md, project_if_phase_b_findings.md, project_inverted_fly_wide_wings_findings.md, project_inverted_fly_standalone_candidates.md, project_bp_if_pairing_findings.md.\
+\
+\b v1.4 \'97 2026-04-24 Inverted Fly Phase C + Universe Expansion + Earnings Bias Scan\b0\
+\
+Three extensions to the Inverted Fly section and a restructuring of the Earnings Plays section.\
+\
+\'95  \b Inverted Fly Phase C completed.\b0  Multi-year walk-forward of the term-inversion entry gate: VALIDATED across four rolling train/validate splits; gate positive in every validation window with strongest lift in the most recent two windows (+$0.81 on 2023-2025, +$0.63 on 2024-2026). Rolling at dte_21 loss check-point and stop-loss at dte_21 loss check-point: both FALSIFIED via proxy tests on existing data (rolling +$0.005 lift = noise; stop-loss \'96$0.005 = slight damage). Both moved from Pending Investigations to "What Doesn't Work \'97 Inverted fly management variants." True daily-marks stop-loss remains open as the surviving pending item. Detail memory: project_if_phase_c_findings.md.\
+\'95  \b Inverted Fly universe expansion completed.\b0  Extracted 14 new tickers from the existing ORATS parquet archive (no SFTP pull needed; the 150-universe by_ticker set was a subset of a 5,700-ticker archive). Ran wide-wings backtest at 10% and 15% wings, slip=0.25, on the new names. Standalone singles shortlist extended from 5 to 8: ADD NVDA (tight tail, gate works cleanly), AMZN (high dollar scale, massive gate lift +$4.26), GOOGL (high dollar scale, validates without the gate \'97 gate-hurt puzzle preserved for follow-up). Low-conviction diversifier tier ADD: SCCO (copper, 2026 YTD strongest), GOLD (gold, tight tail), CLF (steel, tightest tail \'96$1.50 worst). REJECT the remaining 8 new tickers on walk-forward failure: AU, KGC, PAAS, BKR, NUE, STLD, TECK, SLB. 2026 YTD regime observation: commodity names working, Mag-tech fading \'97 normal rotation, flagged as expected pair-book behavior. Detail memory: project_if_universe_expansion.md.\
+\'95  \b Earnings Plays section restructured from "Placeholder" to "Scoping."\b0  yfinance earnings calendar confirmed as usable data source (2020-2026, ~24 events per equity ticker). First-pass directional bias scan completed: identified cohorts of names that usually go UP on earnings (SCCO, CNQ, KO, NUE, KGC, GOOGL, META, WFC, among others at >=60% positive, min N=20) and USUALLY DOWN (INTC, JBLU, LCID, NEM, FCX, CAR, at <=40% positive). Cross-validation: SCCO appears on both the IF diversifier shortlist AND the earnings-up list \'97 double-confirmation. Candidate structure list narrowed to defined-risk directional verticals aligned with bias, long straddle pre-earnings on term-inverted days, and covered calls on existing holdings. Undefined-risk structures (short strangle, naked short) confirmed excluded per user policy. Full earnings-plays backtest remains pending. Detail memory: project_earnings_bias_scan.md.\
+\
+\b v1.5 \'97 2026-04-25 Earnings structure-level backtest, T1 promoted\b0\
+\
+The Priority 1 deliverable from the 2026-04-24 EOD agenda. Pre-registered four tests (T1 bull put on bias-up; T2 bear call on bias-down; T3 non-earnings control; T4 inverted fly on high-vol; T5 covered call deferred). Sealed hypotheses and falsification criteria in docs/EARNINGS_PREREG.md before any code ran. Built three new scripts in scripts/backtest/ (earnings_events_cache.py, earnings_structure_backtest.py, earnings_aggregate.py). Cached 614 earnings events across 26 cohort tickers. Ran 27,384 raw rows (4,654 earnings + 22,730 control) at the matrix \{T-3, T-1\} \'d7 \{T+1, T+3, exp\} \'d7 \{slip=0.25, slip=0.50\}.\
+\
+\'95  \b T1 PROMOTED.\b0  Bull put on bias-up cohort, T-3 entry (T-1 for SCCO and CNQ), held to monthly OpEx expiration, slip=0.50: mean +$0.245/cycle, 82% win rate, lift +$0.289 over non-earnings control, p=0.005, N=175. Eight names survive cohort-level: GOOGL, NUE, META, KO, WFC, RRC, SCCO, CNQ. Drop NRG (negative lift), KGC (N too thin), CX/ITUB (penny-stock pricing infeasible). Full Earnings Plays section rewritten from "Scoping" to the deployable spec above.\
+\'95  \b T2 NOT PROMOTED at cohort level.\b0  Lift is real and statistically significant in every cell, but absolute mean hovers at zero. Single-name carve-out: INTC bear_call earnings (T-1 exp, +$0.145 mean, 82% win, +$0.318 lift) added as a single-name appendix.\
+\'95  \b T4 cohort INCONCLUSIVE (p=0.53), single-name PLTR PROMOTED.\b0  PLTR inverted_fly T-3 exp slip=0.50: +$0.82 mean, 82% win, +$0.83 lift. Cleanest long-vol earnings result in the test.\
+\'95  Held-to-expiration consistently dominates short-dated exits (T+1, T+3) for both T1 and T2 verticals. IV crush is captured by T+1; residual gamma erodes the rest.\
+\'95  Glossary gained four new Statistical Tests entries (T1, T2, T3, T4) and a Synthetic non-earnings control reference entry.\
+\'95  Detail memory: project_earnings_structure_findings.md.\
+\
+\b v1.6 \'97 2026-04-25 ZEBRA added; Jade Lizard tested and not promoted; Super Bull skipped\b0\
+\
+TastyTrade-strategies investigation completed in this revision. Three strategies were on the user's investigation list. Two tested, one skipped. One promoted into the plan, one rejected on policy grounds.\
+\
+\'95  \b ZEBRA (Zero Extrinsic Back Ratio) PROMOTED.\b0  Full structure section added between Inverted Fly and Earnings Plays. Pre-registered (docs/ZEBRA_PREREG.md) and tested 2026-04-25 across the 36-name v1.5 deployable cohort, 4,064 cycles at slip=0.50, 75-DTE entry held to expiration. All four pre-reg hypotheses pass: extrinsic-rule fire rate ~95% (H1), flat-day MTM +$0.58/day (H2), median upside capture 1.152 (H3 \'97 BEATS long stock), capital efficiency 0.21 (H4). Walk-forward validates on all 13 top cohort names. Defined-risk by construction (max loss = debit). Tier 1: SPY, QQQ, MSFT, NVDA, GOOGL, META, AMZN. Tier 2: DIA, IWM, GLD, TJX, GE, WMT, AMD, PLTR. Position Sizing section gained a capital-outlay-based block specific to ZEBRA \'97 per-contract debits range from ~$7K (SPY) to ~$70K (AMZN), so contract-count sizing fails. Allocation rule: 5\'9610% of book equity per ZEBRA position; 30% book-equity cap on total ZEBRA exposure. Glossary gained the Structure entry and a Statistical Tests entry for the backtest itself. Detail memory: project_zebra_findings.md.\
+\'95  \b Jade Lizard NOT PROMOTED \'97 added to What Doesn't Work / Statistical Tests glossary.\b0  Pre-registered (docs/JADE_LIZARD_PREREG.md) and tested 2026-04-25 across the 142-name skew-rich universe, 5,110 matched cycles vs BP+BC baseline, 45-DTE entry. Backtest passes 5 of 6 technical gates (managed-exit lift +$0.53/cycle, p=0.002, walk-forward validates on 8 of 9 top names, 39 names with positive lift). Fails the defined-risk policy gate due to the naked short put leg \'97 the "credit > wing" rule that defines Jade Lizard's structural advantage is only achievable because the put side is naked, and adding a long-put leg to make it policy-compliant collapses the structure to an iron condor (already rejected). User-asked follow-up: would a stop loss on the naked put save it? Tested 2026-04-25; stops do NOT save the strategy. Two failure modes both manifest: gap risk eats most savings on bloodbath cycles, and false triggers destroy wins on cycles that would have recovered (best stop policy still cuts cohort mean from +$0.19 to +$0.06). Reusable lesson: any TastyTrade-style strategy whose backtest edge depends on naked premium cannot be rescued with stop losses. Detail memory: project_jade_lizard_findings.md.\
+\'95  \b Super Bull skipped.\b0  Same naked-short-put structural property as Jade Lizard; user opted not to test on policy-symmetry grounds. The investigation set is closed.\
+\'95  Plan version bumped to 1.6.\
+\
+\b v1.7 \'97 2026-04-25 Regime Transition section added; daily regime-state cron extension\b0\
+\
+Added the Regime Transition section between Regime Overrides and What Doesn't Work. Closes the gap identified during the v1.6 review: the plan specified what triggers fire when, and what each structure does, but did not formalize what happens to an existing multi-structure book during a regime rotation.\
+\
+\'95  \b Five-stage transition framework\b0  (soft-downsize \'85 SPY<200dma alone \'85 H1 fires \'85 trough-side decline \'85 recovery). Each stage specifies which new entries are permitted at what size and which existing positions auto-manage via their structure-specific exits.\
+\'95  \b Per-name conflict rules formalized.\b0  No bull_put + bear_call on the same name same monthly OpEx expiration (= accidental iron condor, already rejected). ZEBRA + bear_call same name = undefined, prefer not to layer. ZEBRA + IF same name = natural regime hedge, encouraged.\
+\'95  \b H1 alignment audit (2026-04-25)\b0  on the SPY ORATS history confirmed H1 is high-precision (97.6% of all H1 fires inside a real bear event, only 7 false-positive days in 13 years) and moderate-recall (catches ~50% of -10% drawdown days; misses slow-grind declines like 2018Q1 and 2023). Lead time T-25 to T-50 trading days on fast bears, useless on slow grinds. Recovery side: H1 false-positives 19-75% of recovery days \'97 motivates the explicit Stage 5 SPY-above-200dma cutoff for stopping bear_call deployment.\
+\'95  \b Daily regime-state tracking added to the 9:20 ET cron.\b0  research_cohort_snapshot.py extended to compute SPY 200dma, IVR_252, and the resulting stage classification, persisted into a new regime_state table in metal_project.db. The cycle qualifier (build window 2026-05-01 to 2026-05-04) will read this state to populate the per-symbol GO/PAUSE/DOWNSIZE grid before each entry day. No new cron job; existing cron is extended.\
+\'95  Plan version bumped to 1.7.\
+}

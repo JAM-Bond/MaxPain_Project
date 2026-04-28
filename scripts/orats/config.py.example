@@ -1,0 +1,25 @@
+"""ORATS SFTP credentials + ingest paths.
+
+This is the TEMPLATE. Copy to config.py and fill in real credentials.
+config.py is gitignored.
+"""
+from pathlib import Path
+
+ORATS_FTP_HOST = "ftp.hostedftp.com"
+ORATS_FTP_PORT = 22
+ORATS_FTP_USER = "your_orats_email@example.com"
+ORATS_FTP_PASS = "REPLACE_ME"
+ORATS_REMOTE_BASE = "/smvstrikes"
+
+PROJECT_ROOT = Path.home() / "MaxPain_Project"
+DATA_ROOT = PROJECT_ROOT / "data" / "orats"
+RAW_DIR = DATA_ROOT / "raw"
+CSV_DIR = DATA_ROOT / "csv"
+PARQUET_DIR = DATA_ROOT / "parquet"
+MANIFEST_PATH = DATA_ROOT / "manifest.json"
+LOG_PATH = PROJECT_ROOT / "logs" / "orats_ingest.log"
+
+TIER_1 = [2020, 2022, 2024, 2018]
+TIER_2 = [2023, 2025, 2026]
+TIER_3 = [2015, 2013, 2014, 2016, 2017, 2019, 2021]
+ALL_YEARS = TIER_1 + TIER_2 + TIER_3

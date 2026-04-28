@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  MaxPain dashboard launchd agent — TEMPLATE, DO NOT LOAD YET.
+
+  Copy to ~/Library/LaunchAgents/com.maxpain.dashboard.plist and
+  `launchctl load` only when the dashboard has real content.
+  Do NOT load while the scaffold is empty.
+
+  Port 8503 (8502 is reserved for com.metalproject.dashboard).
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.maxpain.dashboard</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/streamlit</string>
+        <string>run</string>
+        <string>/Users/josephmorris/MaxPain_Project/dashboard/app.py</string>
+        <string>--server.port</string>
+        <string>8503</string>
+        <string>--server.headless</string>
+        <string>true</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/josephmorris/MaxPain_Project</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/josephmorris/MaxPain_Project/logs/dashboard.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/josephmorris/MaxPain_Project/logs/dashboard_error.log</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin</string>
+    </dict>
+</dict>
+</plist>

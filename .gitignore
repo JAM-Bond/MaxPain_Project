@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual envs
+venv/
+.venv/
+env/
+
+# Secrets
+*.env
+*.env.*
+!*.env.example
+config/api_keys.env
+config/*.bak
+
+# ORATS SFTP credentials live in config.py — only the .example template is tracked
+scripts/orats/config.py
+!scripts/orats/config.py.example
+
+# Data / DB
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+data/
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# Streamlit
+.streamlit/secrets.toml
+
+# launchd — only the template is tracked
+dashboard/launchd/*.plist
+!dashboard/launchd/*.plist.template
