@@ -119,7 +119,8 @@ def compute_window_targets(run_date: date) -> dict:
 
 def evaluate_opex_cell(symbol: str, structure: str, window_label: str,
                        target: date, opex: date, days_until: int,
-                       regime: dict, run_date: date) -> dict:
+                       regime: dict, run_date: date,
+                       earnings_dates: list[date] | None = None) -> dict:
     """Apply gate + window logic to one (symbol, structure, window) tuple.
 
     Returns a row dict with fields: symbol, structure, window, target, opex,
@@ -169,6 +170,20 @@ def evaluate_opex_cell(symbol: str, structure: str, window_label: str,
         row["reason"] = gate_reason
         return row
 
+    # 2.5 Earnings-in-holding-window gate. Plan v1.7: "No binary earnings
+    # inside the DTE window — earnings moves are bimodal and break the carry
+    # thesis." Earnings-bias structures bypass: their holding window
+    # intentionally straddles the earnings event.
+    if not structure.endswith("_earnings") and earnings_dates:
+        in_window = [ed for ed in earnings_dates if target <= ed <= opex]
+        if in_window:
+            row["verdict"] = G.VERDICT_SKIP
+            row["reason"] = (
+                f"binary earnings {in_window[0]} inside holding window "
+                f"[{target}, {opex}]"
+            )
+            return row
+
     # 3. Window proximity (target is today or future at this point)
     if days_until > G.ENTRY_WINDOW_TOLERANCE:
         row["verdict"] = G.VERDICT_PENDING
@@ -190,11 +205,45 @@ def evaluate_opex_cell(symbol: str, structure: str, window_label: str,
     return row
 
 
-def build_opex_verdicts(regime: dict, windows: dict, run_date: date) -> list[dict]:
+def load_cohort_earnings(run_date: date) -> dict[str, list[date]]:
+    """Earnings calendar for the union of every OpEx + earnings cohort.
+
+    Returns {symbol: sorted upcoming earnings dates}. Used by the
+    earnings-in-holding-window gate in evaluate_opex_cell. ETFs return empty
+    (yfinance does not cover them) — that is the correct state: ETFs have no
+    binary earnings event.
+    """
+    all_syms = sorted(set(
+        G.COHORT_BULL_PUT
+        + G.COHORT_BEAR_CALL
+        + G.COHORT_INVERTED_FLY_PAIR
+        + G.COHORT_INVERTED_FLY_SINGLE
+        + G.COHORT_ZEBRA_TIER1
+        + G.COHORT_ZEBRA_TIER2
+        + G.COHORT_EARNINGS_BULL_PUT
+        + G.COHORT_EARNINGS_BEAR_CALL
+        + G.COHORT_EARNINGS_INVERTED_FLY
+    ))
+    # 180-day horizon covers the longest window: ZEBRA 75-DTE entry against
+    # the 5th-out OpEx (~150d total).
+    cal = upcoming_earnings(all_syms, run_date, window_days=180)
+    out: dict[str, list[date]] = {}
+    if cal.empty:
+        return out
+    for sym, grp in cal.groupby("ticker"):
+        out[sym] = sorted(grp["earnings_date"].tolist())
+    return out
+
+
+def build_opex_verdicts(regime: dict, windows: dict, run_date: date,
+                         earnings_by_sym: dict[str, list[date]]) -> list[dict]:
     """For each OpEx-anchored structure, generate one row per (symbol, window)."""
     if regime is None:
         return []
     rows = []
+
+    def ed(sym: str) -> list[date] | None:
+        return earnings_by_sym.get(sym)
 
     # Bull put — both Window A (45-DTE managed) and Window B (T-5)
     if "bull_put_45dte" in windows:
@@ -202,14 +251,14 @@ def build_opex_verdicts(regime: dict, windows: dict, run_date: date) -> list[dic
         for sym in G.COHORT_BULL_PUT:
             rows.append(evaluate_opex_cell(
                 sym, "bull_put", "45-DTE-managed (Window A)",
-                target, opex, days_until, regime, run_date,
+                target, opex, days_until, regime, run_date, ed(sym),
             ))
     if "bull_put_t5" in windows:
         target, opex, days_until = windows["bull_put_t5"]
         for sym in G.COHORT_BULL_PUT:
             rows.append(evaluate_opex_cell(
                 sym, "bull_put", "T-5 (Window B)",
-                target, opex, days_until, regime, run_date,
+                target, opex, days_until, regime, run_date, ed(sym),
             ))
 
     # Bear call — 45-DTE only
@@ -220,7 +269,7 @@ def build_opex_verdicts(regime: dict, windows: dict, run_date: date) -> list[dic
                 continue
             rows.append(evaluate_opex_cell(
                 sym, "bear_call", "45-DTE",
-                target, opex, days_until, regime, run_date,
+                target, opex, days_until, regime, run_date, ed(sym),
             ))
 
     # Inverted fly — pair + singles, 45-DTE
@@ -231,12 +280,12 @@ def build_opex_verdicts(regime: dict, windows: dict, run_date: date) -> list[dic
                 continue
             rows.append(evaluate_opex_cell(
                 sym, "inverted_fly_pair", "45-DTE",
-                target, opex, days_until, regime, run_date,
+                target, opex, days_until, regime, run_date, ed(sym),
             ))
         for sym in G.COHORT_INVERTED_FLY_SINGLE:
             rows.append(evaluate_opex_cell(
                 sym, "inverted_fly_single", "45-DTE",
-                target, opex, days_until, regime, run_date,
+                target, opex, days_until, regime, run_date, ed(sym),
             ))
 
     # ZEBRA — Tier 1 + Tier 2, 75-DTE
@@ -245,12 +294,12 @@ def build_opex_verdicts(regime: dict, windows: dict, run_date: date) -> list[dic
         for sym in G.COHORT_ZEBRA_TIER1:
             rows.append(evaluate_opex_cell(
                 sym, "zebra_tier1", "75-DTE",
-                target, opex, days_until, regime, run_date,
+                target, opex, days_until, regime, run_date, ed(sym),
             ))
         for sym in G.COHORT_ZEBRA_TIER2:
             rows.append(evaluate_opex_cell(
                 sym, "zebra_tier2", "75-DTE",
-                target, opex, days_until, regime, run_date,
+                target, opex, days_until, regime, run_date, ed(sym),
             ))
 
     return rows
@@ -536,7 +585,11 @@ def main():
 
     regime = load_regime_state(run_date)
     windows = compute_window_targets(run_date)
-    opex_rows = build_opex_verdicts(regime, windows, run_date) if regime else []
+    earnings_by_sym = load_cohort_earnings(run_date)
+    opex_rows = (
+        build_opex_verdicts(regime, windows, run_date, earnings_by_sym)
+        if regime else []
+    )
     earnings_rows = build_earnings_verdicts(run_date)
     verdict_rows = opex_rows + earnings_rows
 
