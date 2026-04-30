@@ -29,6 +29,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sqlite3
+import sys
 from datetime import datetime, date
 from pathlib import Path
 
@@ -465,6 +466,184 @@ def detect_position_events(positions: pd.DataFrame, thresholds: dict, conn) -> l
     return events
 
 
+# ─── Assignment-zone early warning ────────────────────────────────────────────
+
+ASSIGNMENT_ZONE_DTE = 5  # fire from T-5 through expiry day
+
+
+def detect_assignment_zone(positions: pd.DataFrame, conn) -> list[str]:
+    """Flag open verticals where current spot is between the short and long
+    strike AND DTE ≤ 5 — the zone where one leg gets assigned (100 shares)
+    and the other expires worthless. Held to expiry, this turns a clean
+    $X loss into "you now own 100 shares Monday at the wrong cost basis."
+
+    Per project_assignment_zone_friction.md — held-to-expiry backtests
+    assume cash-equivalent settlement; live assignment is the hidden drag.
+
+    Scope: bull_put + bear_call only. Iron flies / IF / ZEBRA have different
+    assignment mechanics that don't reduce to a simple [low, high] zone.
+    """
+    if positions.empty:
+        return []
+    events = []
+
+    for _, p in positions.iterrows():
+        struct = (p.get("structure") or "").lower()
+        if struct not in ("bull_put", "bear_call"):
+            continue
+        sym = p["symbol"]
+        opex_str = p.get("opex_date")
+        if not opex_str:
+            continue
+        dte = trading_days_to(opex_str)
+        if dte > ASSIGNMENT_ZONE_DTE:
+            continue
+
+        sk = p.get("short_strike")
+        lk = p.get("long_strike")
+        if sk is None or lk is None:
+            continue
+        try:
+            sk = float(sk); lk = float(lk)
+        except Exception:
+            continue
+        zone_lo, zone_hi = (lk, sk) if struct == "bull_put" else (sk, lk)
+
+        # Prefer the freshest spot (Schwab snapshot today, else ORATS yesterday)
+        spot, _ = get_schwab_today(conn, sym)
+        if spot is None:
+            spot, _, _ = get_recent_close(sym)
+        if spot is None:
+            continue
+
+        if not (zone_lo <= spot <= zone_hi):
+            continue
+
+        if dte == 0:
+            sev, label = "🔥", "EXPIRY DAY"
+        elif dte <= 2:
+            sev, label = "🔔", f"T-{dte}"
+        else:
+            sev, label = "⚠", f"T-{dte}"
+
+        # Distance from each strike — informs which side is at risk
+        dist_short = spot - sk if struct == "bear_call" else sk - spot
+        dist_long = spot - lk if struct == "bull_put" else lk - spot
+        # which leg gets assigned: the short leg, when spot pierces it
+        # bull_put: short put assigned if spot ≤ short strike at expiry
+        # bear_call: short call assigned if spot ≥ short strike at expiry
+        events.append(
+            f"{sev} {sym} {struct} {lk:g}/{sk:g} (OpEx {opex_str}): {label}, "
+            f"spot ${spot:.2f} inside [{zone_lo:g}, {zone_hi:g}] — close intraday "
+            f"to avoid 100-share assignment at ${sk:g}"
+        )
+
+    return events
+
+
+# ─── 52-week extreme context (regime tagging, not actionable) ────────────────
+
+W52_LOOKBACK = 252
+W52_NEAR_PCT = 0.05  # within 5% of the extreme = "APPROACHING"
+
+
+def compute_52w_status(symbol: str) -> tuple[str, float | None, float | None,
+                                              float | None] | None:
+    """Return (status, close, hi_252, lo_252) for a symbol from ORATS daily.
+
+    status ∈ {at_52w_high, near_52w_high, at_52w_low, near_52w_low, neither}.
+    Returns None if insufficient history.
+    """
+    path = BY_TICKER / f"{symbol}.parquet"
+    if not path.exists():
+        return None
+    df = pd.read_parquet(path, columns=["trade_date", "stkPx"])
+    df["trade_date"] = pd.to_datetime(df["trade_date"])
+    daily = (df.dropna(subset=["stkPx"])
+               .drop_duplicates("trade_date")
+               .sort_values("trade_date")
+               .set_index("trade_date")["stkPx"])
+    if len(daily) < W52_LOOKBACK:
+        return None
+    window = daily.iloc[-W52_LOOKBACK:]
+    hi = float(window.max())
+    lo = float(window.min())
+    close = float(daily.iloc[-1])
+    if close >= hi - 1e-9:
+        status = "at_52w_high"
+    elif close <= lo + 1e-9:
+        status = "at_52w_low"
+    elif close >= hi * (1 - W52_NEAR_PCT):
+        status = "near_52w_high"
+    elif close <= lo * (1 + W52_NEAR_PCT):
+        status = "near_52w_low"
+    else:
+        status = "neither"
+    return status, close, hi, lo
+
+
+def detect_52w_extreme_positions(positions: pd.DataFrame) -> list[str]:
+    """Tag open positions whose underlying is at or near a 52w extreme.
+
+    Per project_52w_extremes_rejected.md: not actionable as a filter, but
+    informative regime context — 52w highs = low-vol melt-up; 52w lows =
+    vol expansion / premium-seller stress.
+    """
+    if positions.empty:
+        return []
+    seen = set()
+    events = []
+    for _, p in positions.iterrows():
+        sym = p["symbol"]
+        if sym in seen:
+            continue
+        seen.add(sym)
+        result = compute_52w_status(sym)
+        if result is None:
+            continue
+        status, close, hi, lo = result
+        if status == "neither":
+            continue
+        if status == "at_52w_high":
+            events.append(f"🔼 {sym} at 52w HIGH (${close:.2f}, range ${lo:.2f}–${hi:.2f}) — low-vol regime")
+        elif status == "near_52w_high":
+            pct_from_hi = (hi - close) / hi * 100
+            events.append(f"⬆ {sym} approaching 52w high (${close:.2f}, {pct_from_hi:.1f}% below ${hi:.2f}) — low-vol regime")
+        elif status == "at_52w_low":
+            events.append(f"🔽 {sym} at 52w LOW (${close:.2f}, range ${lo:.2f}–${hi:.2f}) — vol expansion / premium-seller stress")
+        elif status == "near_52w_low":
+            pct_from_lo = (close - lo) / lo * 100
+            events.append(f"⬇ {sym} approaching 52w low (${close:.2f}, {pct_from_lo:.1f}% above ${lo:.2f}) — vol expansion regime")
+    return events
+
+
+def detect_if_candidates_at_52w_lows() -> list[str]:
+    """Scan the inverted_fly cohort for names currently at (or near) 52w lows.
+
+    Per project_52w_extremes_rejected.md secondary use: 52w-low names show
+    2× baseline realized vol — long-vol territory, IF thesis confirmation.
+    Lists candidates the user does NOT necessarily hold; informational only.
+    """
+    try:
+        sys.path.insert(0, str(Path.home() / "MaxPain_Project"))
+        from scripts.qualifier import gate_config as G
+    except Exception:
+        return []
+    cohort = sorted(set(G.COHORT_INVERTED_FLY_PAIR + G.COHORT_INVERTED_FLY_SINGLE))
+    candidates = []
+    for sym in cohort:
+        result = compute_52w_status(sym)
+        if result is None:
+            continue
+        status, close, hi, lo = result
+        if status == "at_52w_low":
+            candidates.append(f"🔽 {sym} at 52w LOW (${close:.2f}) — IF setup confirmation")
+        elif status == "near_52w_low":
+            pct_from_lo = (close - lo) / lo * 100
+            candidates.append(f"⬇ {sym} approaching 52w low (${close:.2f}, {pct_from_lo:.1f}% above ${lo:.2f})")
+    return candidates
+
+
 # ─── Entry window alerts ──────────────────────────────────────────────────────
 
 ENTRY_WINDOW_LEAD_DAYS = 3  # fire alert from D-3 through entry day (gives ~2 trading days
@@ -654,6 +833,14 @@ def main():
     elif args.verbose:
         print(f"  (no position-level events)")
 
+    # Assignment-zone section (open verticals where spot is between strikes & DTE ≤ 5)
+    assignment_events = detect_assignment_zone(positions, conn)
+    if assignment_events:
+        print(f"\n  ASSIGNMENT ZONE WARNING (close intraday to avoid 100-share assignment)")
+        print(f"  {'-'*68}")
+        for ev in assignment_events:
+            print(f"  {ev}")
+
     # Entry-window section (fires when Window A 45-DTE or Window B T-5 entry is approaching)
     entry_window_events = detect_entry_windows(conn)
     if entry_window_events:
@@ -671,6 +858,22 @@ def main():
         for ev in actionable_earnings:
             print(f"  {ev}")
 
+    # 52w-extreme tagging on open positions (regime context, not actionable)
+    extreme_events = detect_52w_extreme_positions(positions)
+    if extreme_events:
+        print(f"\n  52-WEEK EXTREME CONTEXT (open positions at 52w highs/lows)")
+        print(f"  {'-'*68}")
+        for ev in extreme_events:
+            print(f"  {ev}")
+
+    # IF cohort screening — names currently at 52w lows (long-vol setup confirmation)
+    if_candidates = detect_if_candidates_at_52w_lows()
+    if if_candidates:
+        print(f"\n  IF COHORT AT 52W LOWS (long-vol setup confirmation, not yet held)")
+        print(f"  {'-'*68}")
+        for c in if_candidates:
+            print(f"  {c}")
+
     # DTE checkpoints section
     dte_events = detect_dte_checkpoints(positions, conn)
     if dte_events:
@@ -680,7 +883,10 @@ def main():
             print(f"  {ev}")
 
     # All-quiet footer
-    if not regime_events and not approach_events and not pos_events and not entry_window_events and not actionable_earnings and not dte_events:
+    if (not regime_events and not approach_events and not pos_events
+            and not assignment_events and not entry_window_events
+            and not actionable_earnings and not extreme_events
+            and not if_candidates and not dte_events):
         print(f"\n  ✓ All quiet — no alerts.")
 
     print(f"\n{'='*72}\n")
