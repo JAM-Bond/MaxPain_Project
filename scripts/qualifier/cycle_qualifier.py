@@ -82,6 +82,30 @@ def compute_window_targets(run_date: date) -> dict:
     # 5 OpEx lookahead so ZEBRA's 75-DTE entry (~2.5 cycles out) is always visible
     opexes = next_n_opexes(5, today=run_date)
 
+    # ── Covered-call window: trading day AFTER prior monthly OpEx ──────
+    # Logic: covered-call entry = first trading day after the OpEx that
+    # opened the current monthly cycle, expiry = next monthly OpEx.
+    # If today is past tolerance for the current cycle, look at the next.
+    if opexes:
+        from lib.opex_calendar import third_friday
+
+        def _prior_opex(opex_d: date) -> date:
+            yr = opex_d.year if opex_d.month > 1 else opex_d.year - 1
+            mo = opex_d.month - 1 if opex_d.month > 1 else 12
+            return third_friday(yr, mo)
+
+        for opex in opexes[:3]:
+            entry_day = trading_day_offset(_prior_opex(opex), 1)
+            days_until = trading_days_between(run_date, entry_day)
+            within_tolerance = days_until >= -G.WINDOW_COVERED_CALL_AFTER_OPEX_TOLERANCE
+            if not within_tolerance:
+                continue
+            existing = out.get("covered_call_monthly")
+            if existing is None or existing[2] > days_until:
+                out["covered_call_monthly"] = (entry_day, opex, days_until)
+            if days_until >= 0:
+                break  # found the soonest forward entry; stop here
+
     for opex in opexes:
         # 45-DTE entry: calendar days back from OpEx, snapped to nearest weekday
         target_45 = calendar_days_before(opex, 45)
@@ -164,6 +188,8 @@ def evaluate_opex_cell(symbol: str, structure: str, window_label: str,
             gate_ok = False
             gate_reason = "IF term-inv gate off (need term_inverted)"
     # ZEBRA: no regime gate
+    # covered_call: no regime gate — range-bound thesis is structural
+    # (floating-rate senior loans / high-yield credit ETFs), not regime-driven
 
     if not gate_ok:
         row["verdict"] = G.VERDICT_SKIP
@@ -299,6 +325,17 @@ def build_opex_verdicts(regime: dict, windows: dict, run_date: date,
         for sym in G.COHORT_ZEBRA_TIER2:
             rows.append(evaluate_opex_cell(
                 sym, "zebra_tier2", "75-DTE",
+                target, opex, days_until, regime, run_date, ed(sym),
+            ))
+
+    # Covered call — credit ETFs (BKLN/JNK/HYG), monthly cycle
+    # Entry = trading day after prior monthly OpEx; expiry = next monthly OpEx
+    # No regime gate; earnings gate naturally inert (ETFs don't report earnings)
+    if "covered_call_monthly" in windows:
+        target, opex, days_until = windows["covered_call_monthly"]
+        for sym in G.COHORT_COVERED_CALL:
+            rows.append(evaluate_opex_cell(
+                sym, "covered_call", "monthly (post-OpEx entry)",
                 target, opex, days_until, regime, run_date, ed(sym),
             ))
 

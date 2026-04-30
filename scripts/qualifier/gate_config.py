@@ -51,6 +51,13 @@ COHORT_EARNINGS_BULL_PUT = [
 COHORT_EARNINGS_BEAR_CALL = ["INTC"]   # single-name carve-out
 COHORT_EARNINGS_INVERTED_FLY = ["PLTR"]  # single-name carve-out
 
+# Covered call on credit ETFs — promoted 2026-04-30 per the
+# project_covered_call_credit_etfs_findings memory. Range-bound credit ETFs
+# with monthly distributions where bull_put credit verticals fail the
+# execution gate (wide bid-ask + coarse $1 strike grid).
+# TLT excluded — fails 2021-2024 walk-forward (rate-hike crash).
+COHORT_COVERED_CALL = ["BKLN", "JNK", "HYG"]
+
 
 # ─── Entry windows (calendar/trading days, per plan) ──────────────────
 
@@ -59,6 +66,10 @@ WINDOW_BULL_PUT_T5 = 5             # Window B: T-5 trading days
 WINDOW_BEAR_CALL_45DTE = 45
 WINDOW_INVERTED_FLY_45DTE = 45
 WINDOW_ZEBRA_75DTE = 75
+# Covered call: enter the trading day AFTER prior monthly OpEx, hold to
+# next monthly OpEx (~21 trading days). Window is "first 1-2 trading days
+# after prior OpEx" — a single-shot entry per cycle.
+WINDOW_COVERED_CALL_AFTER_OPEX_TOLERANCE = 2  # trading days after prior OpEx
 
 # Earnings entries in TRADING DAYS before earnings event
 WINDOW_EARNINGS_T3 = 3             # default T-3
@@ -116,6 +127,7 @@ def is_in_cohort(symbol: str, structure: str) -> bool:
         "bull_put_earnings": COHORT_EARNINGS_BULL_PUT,
         "bear_call_earnings": COHORT_EARNINGS_BEAR_CALL,
         "inverted_fly_earnings": COHORT_EARNINGS_INVERTED_FLY,
+        "covered_call": COHORT_COVERED_CALL,
     }
     return symbol in cohorts.get(structure, [])
 
@@ -126,4 +138,5 @@ ALL_STRUCTURES = [
     "inverted_fly_pair", "inverted_fly_single",
     "zebra_tier1", "zebra_tier2",
     "bull_put_earnings", "bear_call_earnings", "inverted_fly_earnings",
+    "covered_call",
 ]

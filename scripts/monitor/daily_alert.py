@@ -30,7 +30,7 @@ import argparse
 import logging
 import sqlite3
 import sys
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -711,6 +711,136 @@ def detect_entry_windows(conn) -> list[str]:
 
 # ─── Earnings risk section ────────────────────────────────────────────────────
 
+# ─── Ex-dividend assignment-risk warning (covered-call positions only) ──────
+
+EXDIV_LEAD_DAYS = 3        # fire from D-3 through ex-div day
+EXDIV_NEAR_PCT = 0.01       # also fire if short call within 1% of strike (about-to-be-ITM)
+
+
+def _last_business_day_of_month(yr: int, mo: int) -> date:
+    """Approximate ex-div for a credit ETF — last weekday of the month."""
+    if mo == 12:
+        nxt = date(yr + 1, 1, 1)
+    else:
+        nxt = date(yr, mo + 1, 1)
+    d = nxt - timedelta(days=1)
+    while d.weekday() >= 5:
+        d -= timedelta(days=1)
+    return d
+
+
+def _project_forward_exdivs(symbol: str, today_date: date,
+                             window_days: int = 35) -> list[date]:
+    """Forward ex-div date list for a symbol within `window_days`.
+
+    Strategy: pull yfinance dividend history; check cadence. For monthly
+    distributors (credit ETFs), project the next month's ex-div as the last
+    business day of the current month if today is in early month, or next
+    month otherwise. Falls back to empty list on any error.
+    """
+    try:
+        import yfinance as yf
+        divs = yf.Ticker(symbol).dividends
+        if divs is None or divs.empty:
+            return []
+        # Recent ex-div dates
+        recent = sorted([pd.Timestamp(d).tz_localize(None).normalize().date()
+                         for d in divs.index])
+        # Spot-check cadence: if 8 of last 12 are within 35 days of each other,
+        # treat as monthly and project.
+        if len(recent) < 6:
+            return []
+        gaps = [(recent[i] - recent[i - 1]).days for i in range(1, len(recent))]
+        recent_gaps = gaps[-12:]
+        monthly = sum(1 for g in recent_gaps if 25 <= g <= 35)
+        if monthly < 6:
+            return []  # not a regular monthly distributor
+        # Project: last-business-day-of-month for current and next month
+        candidates = []
+        for offset in range(0, window_days, 28):
+            check = today_date + timedelta(days=offset)
+            candidates.append(_last_business_day_of_month(check.year, check.month))
+        candidates = sorted(set(candidates))
+        return [d for d in candidates
+                if today_date <= d <= today_date + timedelta(days=window_days)]
+    except Exception:
+        return []
+
+
+def detect_ex_div_assignment_risk(positions: pd.DataFrame, conn) -> list[str]:
+    """Fire when an open stock-holding position (covered_call) faces:
+      (a) ex-div within EXDIV_LEAD_DAYS trading days, AND
+      (b) short call ITM or within EXDIV_NEAR_PCT of strike.
+
+    Early-exercise risk: deep ITM call holders exercise the day before
+    ex-div to capture the dividend, calling away your shares + forfeiting
+    the dividend you'd otherwise collect. Closing the call before ex-div
+    keeps the dividend (cost: pay back remaining premium of the short call).
+
+    Filters to structure='covered_call' — credit verticals have no stock
+    leg to call away, so ex-div is irrelevant for them.
+    """
+    if positions.empty:
+        return []
+    cc = positions[positions["structure"].str.lower() == "covered_call"]
+    if cc.empty:
+        return []
+    today_date = date.today()
+    events = []
+    for _, p in cc.iterrows():
+        sym = p["symbol"]
+        sk = p.get("short_strike")
+        if sk is None:
+            continue
+        try:
+            sk = float(sk)
+        except Exception:
+            continue
+        # Get current spot
+        spot, _ = get_schwab_today(conn, sym)
+        if spot is None:
+            spot, _, _ = get_recent_close(sym)
+        if spot is None:
+            continue
+        # Is short call ITM or about-to-be-ITM?
+        ratio = (spot / sk - 1) if sk > 0 else 0
+        is_itm = spot >= sk
+        is_near = ratio >= -EXDIV_NEAR_PCT  # within 1% below strike
+        if not (is_itm or is_near):
+            continue
+        # Forward ex-div lookahead
+        upcoming = _project_forward_exdivs(sym, today_date,
+                                            window_days=EXDIV_LEAD_DAYS * 3)
+        if not upcoming:
+            continue
+        next_exdiv = upcoming[0]
+        days_to_exdiv = (next_exdiv - today_date).days
+        if days_to_exdiv > EXDIV_LEAD_DAYS:
+            continue
+
+        if days_to_exdiv == 0:
+            sev = "🔥"
+            band = "EX-DIV TODAY"
+        elif days_to_exdiv == 1:
+            sev = "🔔"
+            band = "EX-DIV TOMORROW"
+        else:
+            sev = "🔔"
+            band = f"EX-DIV in {days_to_exdiv} days"
+
+        if is_itm:
+            zone = f"ITM {(spot - sk):.2f}"
+        else:
+            zone = f"near strike ({ratio*100:+.1f}%)"
+
+        events.append(
+            f"{sev} {sym} covered_call K={sk:g}: {band} ({next_exdiv}), "
+            f"spot ${spot:.2f} {zone} — close call before ex-div to keep dividend "
+            f"or accept early-exercise"
+        )
+    return events
+
+
 def load_earnings_cache() -> pd.DataFrame:
     if not EARNINGS_CACHE.exists():
         return pd.DataFrame()
@@ -849,6 +979,14 @@ def main():
         for ev in entry_window_events:
             print(f"  {ev}")
 
+    # Ex-div assignment-risk section (covered-call positions only)
+    exdiv_events = detect_ex_div_assignment_risk(positions, conn)
+    if exdiv_events:
+        print(f"\n  EX-DIV ASSIGNMENT RISK (close call before ex-div to keep dividend)")
+        print(f"  {'-'*68}")
+        for ev in exdiv_events:
+            print(f"  {ev}")
+
     # Earnings-risk section
     earnings_events = detect_earnings_risk(positions)
     actionable_earnings = [e for e in earnings_events if not e.startswith("(")]
@@ -885,8 +1023,8 @@ def main():
     # All-quiet footer
     if (not regime_events and not approach_events and not pos_events
             and not assignment_events and not entry_window_events
-            and not actionable_earnings and not extreme_events
-            and not if_candidates and not dte_events):
+            and not exdiv_events and not actionable_earnings
+            and not extreme_events and not if_candidates and not dte_events):
         print(f"\n  ✓ All quiet — no alerts.")
 
     print(f"\n{'='*72}\n")
