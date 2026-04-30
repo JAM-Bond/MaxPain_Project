@@ -8,7 +8,7 @@
 \f0\b\fs36 \cf0 MaxPain Project \'97 Formal Trading Plan\
 \pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\qc\pardirnatural\partightenfactor0
 
-\f1\b0\fs24 \cf0 Version 1.8 \'b7 2026-04-30\
+\f1\b0\fs24 \cf0 Version 1.9 \'b7 2026-04-30\
 \pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
 \cf0 \
 
@@ -495,6 +495,64 @@ Cyclicals and commodity-flow names where the underlying did not sustain a direct
 \'95  Walk-forward on the bottom cohort to confirm the directional-bias-required interpretation \'97 if cyclical names show flat-out positive ZEBRA in a future bull regime, the exclusion list may need revisiting.\
 \'95  Whether ZEBRA on bull_put cohort names (e.g., MSFT, TJX, WMT) outperforms running bull_put on those names per-cycle on a capital-adjusted basis. Different sizing baselines make a direct comparison non-trivial.\
 \
+\f0\b\fs28 Covered Call (Credit ETFs) \'97 Tested 2026-04-30, PROMOTED\
+
+\f1\b0\fs24 Income / yield-enhancement strategy on range-bound credit ETFs whose options market is too thin for credit verticals to extract premium efficiently. Long stock + short OTM call captures monthly dividend distributions and call premium while the stock stays anchored by structural mechanics (floating-rate senior loans for BKLN; high-yield bond mechanics for JNK / HYG). Validated 2026-04-30 across 132 monthly cycles per name 2013-2026; pre-registration sealed in docs/COVERED_CALL_CREDIT_ETFS_PREREG.md. Closes the long-deferred T5 covered-call line from EARNINGS_PREREG.md.\
+\
+\b Why this is a separate trade family\b0\
+\
+\'95  The bull_put cohort fails the execution gate on these names \'97 wide bid-ask plus coarse $1 strike spacing means a 30\uc0\u916  OTM put either doesn't exist (BKLN) or carries credit too small to survive realistic slip.\
+\'95  The covered call sidesteps this by paying the bid-ask cost ONCE at the call sale (not the round trip a credit vertical pays).\
+\'95  Yield-enhancement profile is structurally distinct from premium-selling (bull_put / bear_call), long-vol (inverted fly), and synthetic-stock (ZEBRA) families. Defined-risk by construction: stock cost \'97 premium \'97 dividends is the worst-case loss, realized only if the structural anchor breaks.\
+\
+\b Structure (VALIDATED)\b0\
+\
+\'95  Long 100 shares per contract\
+\'95  Short 1 call at 30\uc0\u916  closest, expiring next monthly OpEx (\uc0\u8776 21 trading days)\
+\'95  Held to expiry; no managed exit; no rolling; no stop-loss\
+\'95  Per-cycle P&L per share = (min(S\uc0\u8321 , K) \'96 S\uc0\u8320 ) + premium \'96 slip + dividends_in_window\
+\
+\b Symbols that respond well (TESTED, VALIDATED at slip=0.05, walk-forward stable across 4 windows 2013-2016 / 2017-2020 / 2021-2024 / 2025-2026)\b0\
+\
+\'95  \b BKLN\b0  \'97 +7.7% annualized return on capital, 82% win rate, $20\'9623 range for 13 years, ~7% distribution yield. Floating-rate senior loans; near-zero duration risk. Strongest cohort name.\
+\'95  \b JNK\b0  \'97 +7.2% annualized, 77% win rate, ~6% yield. High-yield bond ETF.\
+\'95  \b HYG\b0  \'97 +4.1% annualized, 70% win rate, ~6% yield. High-yield bond ETF; also bull_put-eligible (cohort name) \'97 covered call vs managed-exit bull_put on HYG is a capital-efficiency choice, not a thesis choice.\
+\
+\b Symbols that do NOT respond well (TESTED, EXCLUDED)\b0\
+\
+\'95  \b TLT\b0  \'97 walk-forward FALSIFIED in 2021-2024 (rate-hike crash, mean \'96$0.48/share that window). Long-duration Treasury ETF lacks the floating-rate / par-anchor mechanics that protect BKLN. Don't run TLT covered call until rate volatility settles; revisit in a future regime audit.\
+\
+\b Why the structural anchor holds\b0\
+\
+\'95  BKLN: floating-rate senior loans; coupons reset every 30\'9690 days, so duration risk is near zero. Par value barely moves except in genuine credit dislocations.\
+\'95  JNK / HYG: high-yield bond ETFs with monthly distributions. Pull toward par value over time.\
+\'95  Recovery dynamics: at the COVID March 2020 dislocation, BKLN hit $17.24 intraday and was back over $20 within ~2 weeks. The structural anchor is fast as well as durable. A monthly cycle that started during the dislocation would close fully recovered \'97 which is why the strategy uses no stop-loss rule. Managing a 5% stock decline would crystallize a temporary loss on what's structurally a self-healing instrument.\
+\
+\b Trade mechanics\b0\
+\
+\'95  Entry: close on the trading day after prior monthly OpEx. The qualifier fires PENDING from D-3 through entry day, GO on entry day. (See Decision Support Infrastructure for cron timing.)\
+\'95  Strike: closest-to-30\uc0\u916  OTM call. On a $1-strike ETF this typically lands at K = round(spot) + 1.\
+\'95  Hold: to next monthly OpEx. No managed exit, no rolling.\
+\'95  Exit: if S\uc0\u8321  \uc0\u8805  K, stock called away at K and you capture premium + dividends + (K \'96 S\uc0\u8320 ) = max profit per cycle. If S\uc0\u8321  < K, keep stock and capture premium + dividends + (S\uc0\u8321  \'96 S\uc0\u8320 ); next cycle re-arm a new short call against existing stock.\
+\'95  Realistic execution: BKLN bid often $0.00 on the call, ask $1.00+. Walk a limit order down patiently; expect $0.20\'960.40 fill on a $0.60 mid. The pre-reg slip=0.05 corresponds to mid-$0.05; slip=0.10 is the pessimistic friction.\
+\
+\b Ex-div mechanics (the only mid-cycle decision point)\b0\
+\
+Credit ETFs distribute monthly. If the short call goes ITM near the ex-div date, the call holder will exercise early to capture the dividend, calling away your stock and forfeiting the dividend you'd otherwise collect.\
+\
+Mitigation. Close the short call before ex-div if it's ITM. Closing cost = remaining premium of the short call. If that's less than the upcoming dividend amount, closing is +EV. The daily alert EX-DIV ASSIGNMENT RISK section fires from D-3 through ex-div day when an open covered_call position has spot ITM or within 1% of strike (see Decision Support Infrastructure).\
+\
+\b Sizing\b0\
+\
+Capital-outlay-based, NOT per-contract. Like ZEBRA, covered call doesn't fit the dollar-risk-cap framework because the constraint is upfront capital tied up. See Position Sizing section for full rules.\
+\
+\b Pending investigations\b0\
+\
+\'95  Live execution test: realistic limit-order fills on BKLN at the $0.20\'960.40 range vs the backtest assumption of mid \'96 0.05. The backtest assumes patient limit-order discipline; verify on first paper trade.\
+\'95  Annual dividend rate refresh: the 2013-2026 backtest captures one specific yield regime. Distribution rate changes will alter the annualized-return calculation; re-run scorecard annually.\
+\'95  TLT in a stable-rate regime: the 2021-2024 falsification was a rate-hike artifact. If a future window shows the rate cycle stabilized, revisit the TLT exclusion.\
+\
+
 \f0\b\fs28 Earnings Plays (Tested 2026-04-25)\
 
 \f1\b0\fs24 A separate trade family from the OpEx-anchored book. The 2026-04-24 bias scan established directional priors on stock prices; the 2026-04-25 structure-level backtest converted those priors into option-structure P&L tests. \b One cohort-level rule promotes (T1: bull put on bias-up names, held to expiration).\b0  Two single-name additions also promote. T2 and T4 cohort-level treatments remain non-tradeable per the test outcomes.\
@@ -654,7 +712,7 @@ Three additions to the active set, ranked by edge:\
 
 \f0\b\fs28 Position Sizing\
 
-\f1\b0\fs24 \i Scope: sizing rules for bull_put, bear_call, inverted_fly, and ZEBRA. Inverted fly sizing is described in its own section (by dollar debit per contract). ZEBRA sizing is described below \'97 capital-outlay-based, not per-contract \'97 because per-contract debits range from ~$7K (SPY) to ~$70K (AMZN). Iron condors and iron flies were tested and rejected.\i0\
+\f1\b0\fs24 \i Scope: sizing rules for bull_put, bear_call, inverted_fly, ZEBRA, and covered call. Inverted fly sizing is described in its own section (by dollar debit per contract). ZEBRA and covered call sizing are described below \'97 both capital-outlay-based, not per-contract \'97 because per-contract debits / stock costs range from ~$2K (BKLN covered call) to ~$70K (AMZN ZEBRA). Iron condors and iron flies were tested and rejected.\i0\
 \
 \b First-pass caveat.\b0  The specific percentages below (1.5% per bull_put position, 0.5% per bear_call, 3% per underlying, 40% per cluster, SPX 3x weighting, 15% book-wide) are first-pass defaults for a new trading system. They are not derived from a tested sizing study \'97 they are conservative judgment calls anchored to the defined-risk max losses already present in the strategy. Only paper-test and live experience through the 2026-08-19 window and beyond will tell whether these caps are too tight, too loose, or correctly calibrated. Treat them as a starting discipline, revisit at cycle closes, and update this section in the Revision Log as experience accumulates.\
 \
@@ -722,6 +780,15 @@ Stocks priced above approximately $100 spot get credit verticals only; ZEBRA, in
 ZEBRA on a $200 spot is a $14K-$20K capital outlay per contract; an inverted fly at 10% wings on a $200 spot is a $2K-$3K debit per contract; both are uneconomic on a paper-test or small live book. Verticals scale linearly with strike width regardless of spot, so a $5-wide bull_put on a $200 stock is the same ~$500 max loss as a $5-wide bull_put on a $50 stock.\
 \
 Exception: index ETFs (SPY, QQQ, DIA, IWM) and SPX trade above $100 but are explicitly retained for ZEBRA Tier 1 and IF pair-book duty \'97 index-level capital outlay is acceptable per the ZEBRA capital-outlay framework. The rule applies to high-priced single-name equities specifically: NVDA / GOOGL / META at $200+ are excluded from IF and Jade Lizard but remain in ZEBRA Tier 1 because the structure is purpose-built for high-priced underlyings.\
+\
+\b Covered call sizing \'97 capital-outlay-based, NOT per-contract\b0\
+\
+Like ZEBRA, the constraint is upfront capital tied up rather than max-loss percentage. Per-contract capital is the full stock cost: BKLN ~$2,200, JNK ~$7,500, HYG ~$8,300.\
+\
+\'95  Capital outlay per covered call position: 5\'9610% of book equity. For a $100K paper-test book, target $5K\'9610K outlay per position, then divide by spot price to get the share count (round to lots of 100).\
+\'95  Total covered-call book-equity allocation: \uc0\u8804  20% of book equity in open covered_call positions at one time. Combined with the 30% ZEBRA cap and the 15% bull_put + bear_call cap, this leaves \uc0\u8776  35% of book in cash or money market \'97 acceptable for paper testing.\
+\'95  Worst-case loss is bounded by structural-anchor mechanics, not by a hard floor. The worst tested cycle in 13 years was \'96$4.43/share on BKLN (March 2020 COVID), which fully recovered within 2 weeks. Sizing should contemplate a 20% temporary drawdown on a given position during a credit-cycle dislocation, even though long-run mean is strongly positive.\
+\
 \
 
 \f0\b\fs28 Regime Overrides\
@@ -879,7 +946,7 @@ The 9:20 ET research-cohort capture cron (research_cohort_snapshot.py) is extend
 \
 \b Cycle qualifier (daily 9:25 ET cron)\b0\
 \
-scripts/qualifier/cycle_qualifier.py runs each weekday morning, reads the current regime_state, computes per-symbol per-structure verdicts (GO, DOWNSIZE, PENDING, SKIP, PAUSE), and persists results to cycle_qualifier_runs in metal_project.db plus a dated parquet. Implements every gate in this plan: bull_put signal gate (contango + VRP > 0), bear_call H1 gate (SPY < 200dma + IVR > 0.5), IF term-inversion gate, ZEBRA 75-DTE entry, earnings-track T-1 / T-3 calendar matching, soft-downsize and hard-pause triggers, and per-name overrides (GOOGL no-IF-gate, SCCO and CNQ T-1 earnings entry).\
+scripts/qualifier/cycle_qualifier.py runs each weekday morning, reads the current regime_state, computes per-symbol per-structure verdicts (GO, DOWNSIZE, PENDING, SKIP, PAUSE), and persists results to cycle_qualifier_runs in metal_project.db plus a dated parquet. Implements every gate in this plan: bull_put signal gate (contango + VRP > 0), bear_call H1 gate (SPY < 200dma + IVR > 0.5), IF term-inversion gate, ZEBRA 75-DTE entry, covered_call monthly entry (trading day after prior OpEx), earnings-track T-1 / T-3 calendar matching, soft-downsize and hard-pause triggers, and per-name overrides (GOOGL no-IF-gate, SCCO and CNQ T-1 earnings entry).\
 \
 \b Earnings-in-holding-window gate.\b0  The qualifier also enforces the plan rule "no binary earnings inside the DTE window" \'97 for every non-earnings-bias structure, if any earnings event for the symbol falls in [target, opex] inclusive, the verdict is downgraded to SKIP. Earnings-bias structures (the *_earnings cohorts) bypass the gate by design, since their holding window straddles the earnings event on purpose.\
 \
@@ -898,6 +965,7 @@ scripts/monitor/daily_alert.py runs at 4:45 PM ET each weekday and emits a focus
 \'95  OPEN TRADES \'97 big moves, FRESH strike breaches, deeper-into-breach moves.\
 \'95  ASSIGNMENT ZONE WARNING \'97 open verticals where spot is between strikes AND DTE \uc0\u8804 5. Per project_assignment_zone_friction.md: the zone where one leg gets assigned (100 shares at the short strike) and the other expires worthless. The held-to-expiry backtest engine assumes cash-equivalent settlement and does not model this friction; the alert provides the early warning so the trade can be closed intraday.\
 \'95  ENTRY WINDOW APPROACHING \'97 fires from D-3 through entry day for every Window A / Window B / earnings T-1/T-3 entry. Groups by (window, opex, target).\
+\'95  EX-DIV ASSIGNMENT RISK \'97 fires when an open covered_call position has ex-div within 3 trading days AND the short call is ITM or within 1% of strike. Surfaces the only mid-cycle decision point on the covered call strategy: close the call before ex-div to keep the dividend, or accept early-exercise. Filtered to structure='covered_call' (verticals have no stock leg to call away).\
 \'95  EARNINGS RISK \'97 lists open positions where earnings are inside the holding window.\
 \'95  52-WEEK EXTREME CONTEXT \'97 tags any open position whose underlying is within 5% of its trailing-252-day high or low. Regime context, not actionable as a filter (the 52w-extreme signal was tested as a selection filter and rejected per project_52w_extremes_rejected.md).\
 \'95  IF COHORT AT 52W LOWS \'97 lists IF cohort names currently at 52w lows. Long-vol setup confirmation; informational only.\
@@ -1275,4 +1343,15 @@ Five-day arc closing the operational gap between v1.7 (rules written) and a work
 \'95  \b 52-week extremes signal TESTED, REJECTED as filter.\b0  Universe-level +6pp lift on bull_put / bear_call collapsed to +0.4pp under cohort-restriction (cohort baseline already 86%); walk-forward dead since 2017. Pattern lesson: always condition universe-level findings on the actual cohort baseline AND walk-forward before promoting. Events parquet retained for regime-context tagging only (52w-extreme tagging on open positions and IF cohort 52w-low screening). Detail: project_52w_extremes_rejected.md.\
 \'95  \b Decision Support Infrastructure section added\b0  describing the qualifier, post-mortem, and daily alert capabilities. Placed before "What Doesn't Work" \'97 the operational layer that enforces the rules above.\
 \'95  Plan version bumped to 1.8.\
+\
+\b v1.9 \'97 2026-04-30 Covered Call (credit ETFs) PROMOTED; ex-div alert added\b0\
+\
+New trade family added based on a same-day pre-registered backtest. Yield-enhancement profile structurally distinct from the existing premium-seller / long-vol / synthetic-stock families. First production deployment will be the May 18 \'97 June 19 cycle on BKLN / JNK / HYG.\
+\
+\'95  \b Covered Call (Credit ETFs) PROMOTED.\b0  Pre-registered (docs/COVERED_CALL_CREDIT_ETFS_PREREG.md), tested 2026-04-30 across 132 monthly cycles per name 2013-2026 at slip=0.05 typical / slip=0.10 pessimistic. Validated cohort: BKLN (+7.7% ann return on capital, 82% win), JNK (+7.2%, 77%), HYG (+4.1%, 70%). All three pass walk-forward across four 4-year windows. Closes the long-deferred T5 covered-call line from EARNINGS_PREREG.md. Strategy exists because credit verticals fail the execution gate on these names \'97 wide bid-ask + coarse $1 strike spacing makes 30\uc0\u916  short put either nonexistent (BKLN) or carries credit too small to survive realistic slip. Covered call sidesteps this by paying the bid-ask cost ONCE (call sale), not the round trip a vertical pays. Held-to-expiry, no rolling, no stop-loss \'97 the BKLN COVID 2020 recovery (intraday $17.24 to back-over-$20 within 2 weeks) falsifies any stop-loss rule. Detail memory: project_covered_call_credit_etfs_findings.md.\
+\'95  \b TLT covered call REJECTED.\b0  Same backtest, walk-forward FALSIFIED in 2021-2024 (rate-hike crash, mean \'96$0.48/share that window). Long-duration Treasury ETF lacks the floating-rate / par-anchor mechanics that protect BKLN. Excluded from the cohort with explicit revisit trigger: re-test in a future stable-rate regime audit.\
+\'95  \b Covered call promoted into qualifier.\b0  COHORT_COVERED_CALL = [BKLN, JNK, HYG] in gate_config.py; new monthly window in compute_window_targets (entry = trading day after prior monthly OpEx, expiry = next monthly OpEx, single-shot \'b1 2 day tolerance); evaluate_opex_cell handles covered_call structure with no regime gate. The earnings-in-holding-window gate is naturally inert on credit ETFs (yfinance returns no earnings dates for ETFs). First production output: 3 PENDING (BKLN, JNK, HYG) for entry 2026-05-18 \uc0\u8594  OpEx 2026-06-19.\
+\'95  \b EX-DIV ASSIGNMENT RISK alert added\b0  to scripts/monitor/daily_alert.py. Fires when an open covered_call position has (a) ex-div within 3 trading days AND (b) short call ITM or within 1% of strike. Forward ex-div projection from yfinance dividend cadence (only fires for confirmed monthly distributors). Filtered to structure='covered_call' \'97 verticals don't have stock to call away. The only mid-cycle decision point on the otherwise hands-off covered call strategy.\
+\'95  \b Position Sizing section gained Covered Call sub-section\b0  parallel to ZEBRA: capital-outlay-based, 5\'9610% of book equity per position, \uc0\u8804  20% total covered-call book-equity allocation. Combined with existing ZEBRA 30% and bull_put + bear_call 15% caps, this leaves \uc0\u8776  35% of book in cash / money market.\
+\'95  Plan version bumped to 1.9.\
 }
