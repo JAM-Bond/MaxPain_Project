@@ -465,6 +465,71 @@ def detect_position_events(positions: pd.DataFrame, thresholds: dict, conn) -> l
     return events
 
 
+# ─── Entry window alerts ──────────────────────────────────────────────────────
+
+ENTRY_WINDOW_LEAD_DAYS = 3  # fire alert from D-3 through entry day (gives ~2 trading days
+                             # of evaluation + modeling + order-setup time per user spec)
+
+
+def detect_entry_windows(conn) -> list[str]:
+    """Fire when GO/PENDING qualifier verdicts have days_until ≤ ENTRY_WINDOW_LEAD_DAYS.
+    Covers BOTH Window A (45-DTE managed) and Window B (T-5 / MaxPain) with the same
+    lead-time logic. Fires daily during the window so the user doesn't miss it.
+    Groups by (window, opex) so multi-name cohorts collapse to one summary line."""
+    try:
+        latest = conn.execute(
+            "SELECT MAX(run_date) FROM cycle_qualifier_runs"
+        ).fetchone()
+        if not latest or not latest[0]:
+            return []
+        run_date = latest[0]
+    except Exception:
+        return []
+
+    df = pd.read_sql(f"""
+        SELECT symbol, structure, window, target, opex, days_until, verdict, reason
+        FROM cycle_qualifier_runs
+        WHERE run_date = '{run_date}'
+          AND verdict IN ('GO', 'DOWNSIZE', 'PENDING')
+          AND days_until <= {ENTRY_WINDOW_LEAD_DAYS}
+        ORDER BY days_until, opex, window, verdict, symbol
+    """, conn)
+
+    if df.empty:
+        return []
+
+    events = []
+    for (window, opex, target), grp in df.groupby(["window", "opex", "target"]):
+        days_until = int(grp["days_until"].iloc[0])
+        if days_until == 0:
+            band = "TODAY"
+            sev = "🔥"
+        elif days_until == 1:
+            band = "TOMORROW"
+            sev = "🔔"
+        else:
+            band = f"in {days_until} trading days"
+            sev = "🔔"
+
+        go_names = sorted(grp[grp["verdict"] == "GO"]["symbol"].unique().tolist())
+        ds_names = sorted(grp[grp["verdict"] == "DOWNSIZE"]["symbol"].unique().tolist())
+        pending_n = (grp["verdict"] == "PENDING").sum()
+
+        header = (f"{sev} {window}  →  entry {target} ({band})  ·  OpEx {opex}")
+
+        lines = [header]
+        if go_names:
+            lines.append(f"     GO ({len(go_names)}): {', '.join(go_names)}")
+        if ds_names:
+            lines.append(f"     DOWNSIZE ({len(ds_names)}): {', '.join(ds_names)}")
+        if pending_n > 0:
+            lines.append(f"     PENDING: {pending_n} more (gates may flip — check qualifier output)")
+
+        events.append("\n  ".join(lines))
+
+    return events
+
+
 # ─── Earnings risk section ────────────────────────────────────────────────────
 
 def load_earnings_cache() -> pd.DataFrame:
@@ -589,6 +654,14 @@ def main():
     elif args.verbose:
         print(f"  (no position-level events)")
 
+    # Entry-window section (fires when Window A 45-DTE or Window B T-5 entry is approaching)
+    entry_window_events = detect_entry_windows(conn)
+    if entry_window_events:
+        print(f"\n  ENTRY WINDOW APPROACHING")
+        print(f"  {'-'*68}")
+        for ev in entry_window_events:
+            print(f"  {ev}")
+
     # Earnings-risk section
     earnings_events = detect_earnings_risk(positions)
     actionable_earnings = [e for e in earnings_events if not e.startswith("(")]
@@ -607,7 +680,7 @@ def main():
             print(f"  {ev}")
 
     # All-quiet footer
-    if not regime_events and not approach_events and not pos_events and not actionable_earnings and not dte_events:
+    if not regime_events and not approach_events and not pos_events and not entry_window_events and not actionable_earnings and not dte_events:
         print(f"\n  ✓ All quiet — no alerts.")
 
     print(f"\n{'='*72}\n")
