@@ -8,7 +8,7 @@
 \f0\b\fs36 \cf0 MaxPain Project \'97 Formal Trading Plan\
 \pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\qc\pardirnatural\partightenfactor0
 
-\f1\b0\fs24 \cf0 Version 1.9 \'b7 2026-04-30\
+\f1\b0\fs24 \cf0 Version 2.0 \'b7 2026-04-30\
 \pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
 \cf0 \
 
@@ -72,6 +72,24 @@ Sector is a weak predictor of options behavior. AAPL and TSLA are both Technolog
 \b How the universe flows into this plan\b0\
 \
 Each structure in this document names its own cohort from inside the 150. A name not on the universe list does not appear in the plan. New candidates become universe v1.1 with a dated log entry, and any backtest results on the extended set are reported separately from the v1 baseline.\
+\
+\b Cohort source of truth\b0\
+\
+Each structure deploys against a named code constant rather than against an embedded list. The authoritative cohort lives in scripts/qualifier/gate_config.py:\
+\
+\'95  COHORT_BULL_PUT \'97 bull put 30\uc0\u916  on Window A and Window B\
+\'95  COHORT_BEAR_CALL \'97 bear call 30\uc0\u916  on Window A (regime-gated)\
+\'95  COHORT_INVERTED_FLY_PAIR \'97 inverted fly run alongside bull_put on the same name\
+\'95  COHORT_INVERTED_FLY_SINGLE \'97 inverted fly standalone (no pair partner)\
+\'95  COHORT_ZEBRA_TIER1 / COHORT_ZEBRA_TIER2 \'97 synthetic-stock tiers (Tier 1 high-conviction Mag-7 + indices, Tier 2 broad diversifiers)\
+\'95  COHORT_EARNINGS_BULL_PUT / _BEAR_CALL / _INVERTED_FLY \'97 earnings-track cohorts\
+\'95  COHORT_COVERED_CALL \'97 covered call on credit ETFs\
+\
+The plan describes the SELECTION CRITERIA that put a name into a cohort and the BACKTEST EVIDENCE that supported the inclusion at the time of writing. Cohort membership itself is expected to rotate as new universes are tested, names are excluded by walk-forward, and findings refresh. \b Cohort changes do not require plan revisions \'97 they require gate_config.py edits and corresponding memory entries\b0 . The plan revision log notes only architectural changes, methodology updates, or strategies promoted / demoted as a whole.\
+\
+Names that have been TESTED and EXCLUDED with a documented reason stay in this plan because the reason generalizes (e.g., "TLT excluded from covered call because long-duration Treasury ETF lacks the floating-rate par-anchor mechanics"). The plan-level lesson is the value, not the membership status.\
+\
+Per-name backtest evidence (per-cycle mean, win rate, capture ratio, walk-forward train/val behavior) appearing throughout this document is historical record from the test that established the cohort at the time the section was written. These numbers do not auto-refresh. If the cohort rotates and you want updated evidence, re-run the relevant backtest script and update the memory entry; the plan can stay as-is until a structure-level promotion / demotion warrants a revision.\
 \
 
 \f0\b\fs28 The Pinner Cohort\
@@ -198,8 +216,8 @@ Rolling the paper-test forward without rewriting the plan is a recognized failur
 \'95  Liquidity is non-negotiable \'97 OI at least 10K on relevant strikes, bid-ask at most 10% of mid on both legs\
 \'95  Directional profile: upward drift or range-bound \'97 the implicit bet is "short side near-OTM rarely tested"\
 \'95  No binary earnings inside the DTE window \'97 earnings moves are bimodal and break the carry thesis\
-\'95  Validated shortlist at realistic friction, managed exit: MSFT, TJX, WMT, QQQ, CNC, RIO, SPY, DAL, INTC, WFC, XLU, HYG (73-88% win, +$0.01 to +$0.13 mean, 71-92% year consistency over 13 years)\
-\'95  Highest-conviction four: MSFT, TJX, WMT, QQQ \'97 all above 85% year consistency\
+\'95  Validated shortlist at realistic friction, managed exit: see COHORT_BULL_PUT in gate_config.py. Selection criteria: 73-88% win rate, +$0.01 to +$0.13 mean per cycle, 71-92% year consistency across 13 years. Detail memory: project_per_symbol_bullput_shortlist.md.\
+\'95  Highest-conviction tier \'97 names with year-over-year consistency above 85% across the 13-year sample. The qualifier does not currently distinguish this sub-tier in code; it is descriptive guidance for sizing intuition and review priority.\
 \
 \b Symbols that do NOT respond well\b0\
 \
@@ -649,7 +667,7 @@ N=22 at T-3 exp slip=0.50: +$0.82 mean, 82% win, +$0.83 lift over control. Clean
 \
 Three additions to the active set, ranked by edge:\
 \
-\'95  \b Bull Put \'97 Earnings, cohort rule.\b0  T-3 entry (T-1 for SCCO and CNQ), held to monthly OpEx, 30\uc0\u916  short, 0.5%-spot/$2-floor wings. Names: GOOGL, NUE, META, KO, WFC, RRC, SCCO, CNQ. Drop NRG. KGC sample too thin.\
+\'95  \b Bull Put \'97 Earnings, cohort rule.\b0  T-3 entry (T-1 for SCCO and CNQ per the EARNINGS_T1_NAMES override in gate_config.py), held to monthly OpEx, 30\uc0\u916  short, 0.5%-spot/$2-floor wings. Cohort: see COHORT_EARNINGS_BULL_PUT. Initial cohort dropped NRG (negative lift) and KGC (sample too thin); CX and ITUB rejected post-hoc on penny-stock pricing infeasibility.\
 \'95  \b INTC bear_call \'97 Earnings, single-name.\b0  T-1 entry, held to monthly OpEx, same structural spec mirrored to call side. Aligned with INTC's \'96$5.46% mean earnings-day return.\
 \'95  \b PLTR inverted_fly \'97 Earnings, single-name.\b0  T-3 entry, held to monthly OpEx, 10% wings. Aligned with PLTR's high-news-volatility profile.\
 \
@@ -748,9 +766,9 @@ When any soft-downsize trigger fires (SPY 252-day IV rank > 0.7, SPY near 200dma
 ZEBRA does not fit the dollar-risk-cap framework above because its sizing constraint is the upfront debit (capital tied up), not max loss as a percentage of account. A single AMZN ZEBRA contract carries $40K\'96$70K of capital outlay; an SPY contract is ~$7K. Per-contract sizing would either over-deploy capital on high-priced names or under-deploy on indices.\
 \
 \'95  \b Capital outlay per ZEBRA position:\b0  5\'9610% of book equity. For a $100K paper-test book, target $5K\'96$10K outlay per ZEBRA, then divide by per-contract debit to get the contract count (rounded down).\
-\'95  \b Tier 1 names (SPY, QQQ, MSFT, NVDA, GOOGL, META, AMZN):\b0  high-conviction; size at the upper end of the range (8\'9610%).\
-\'95  \b Tier 2 names (DIA, IWM, GLD, TJX, GE, WMT, AMD, PLTR):\b0  lower-conviction; size at the lower end (5\'967%).\
-\'95  \b Excluded by sample-size thresholds:\b0  AMZN, GOOGL, META, NVDA all have per-contract debits above $20K. On a $100K book under the 10% cap, these are 0\'961 contract positions \'97 either commit one full contract (consuming 50%+ of the ZEBRA book budget) or skip these names. AMZN ZEBRA at $70K debit is effectively excluded under any retail book under $700K.\
+\'95  \b Tier 1 names\b0  (high-conviction Mag-7 + indices, see COHORT_ZEBRA_TIER1): size at the upper end of the range (8\'9610%).\
+\'95  \b Tier 2 names\b0  (broad diversifiers, see COHORT_ZEBRA_TIER2): size at the lower end (5\'967%).\
+\'95  \b Capital-outlay caps in practice:\b0  high-priced single names with per-contract debits above $20K (Mag-7 names trade in this range) yield 0\'961 contracts on a $100K book under the 10% cap. Either commit one full contract (consuming 50%+ of the ZEBRA budget) or skip the name. Index ETFs and lower-priced cohort members fit cleanly. AMZN at $40K\'96$70K debit per contract is effectively excluded under any retail book under $700K.\
 \'95  \b Total ZEBRA book-equity allocation:\b0  no more than 30% of book equity in open ZEBRA positions at one time. Combined with the 15% book-wide max-loss cap on credit spreads, this leaves ~55% of book in cash or money market \'97 acceptable for paper testing.\
 \'95  \b Worst-case loss:\b0  capped at debit per contract. The full debit is realized only if spot expires at or below the long-call strike. Sizing must contemplate a 100% loss of the upfront debit on a given position \'97 do not anchor on the historical mean P&L when sizing.\
 \
@@ -908,7 +926,7 @@ The 2026-04-25 H1 alignment audit on the SPY ORATS history (2013-2026, 11 discre
 \
 \'95  \b Stage 1 \'97 Soft-downsize triggers fire (any of: SPY 252-day IVR > 0.7; SPY within 2% of 200dma trending down; term inverted AND VIX > 20).\b0  \i Action:\i0  cut new bull_put entries to 50% size; pause new ZEBRA entries; permit new IF entries on term-inversion days; bear_call still NOT permitted; existing positions run to their normal exits.\
 \'95  \b Stage 2 \'97 SPY breaks below 200dma but IVR < 0.5.\b0  \i Action:\i0  bull_put hard pause if also term_inv + IVR>0.5; otherwise still 50% size; IF active on term-inversion days; bear_call still NOT permitted (waiting on IVR); ZEBRA held; earnings T1 continues per calendar.\
-\'95  \b Stage 3 \'97 H1 fires (SPY < 200dma AND IVR > 0.5).\b0  \i Action:\i0  bear_call permitted on the 6-name cohort (SPX, SPY, QQQ, DIA, IWM, WMT); bull_put new entries paused if hard-pause also active; IF continues; ZEBRA held; earnings T1 unchanged. \b Critical: do not deploy bear_call on any name where you have an open bull_put on the same monthly OpEx expiration.\b0  Bull_put + bear_call on the same name same expiration = an iron condor, which we tested and rejected.\
+\'95  \b Stage 3 \'97 H1 fires (SPY < 200dma AND IVR > 0.5).\b0  \i Action:\i0  bear_call permitted on the COHORT_BEAR_CALL set (broad equity indices and one defensive-consumer name; see gate_config.py for current membership); bull_put new entries paused if hard-pause also active; IF continues; ZEBRA held; earnings T1 unchanged. \b Critical: do not deploy bear_call on any name where you have an open bull_put on the same monthly OpEx expiration.\b0  Bull_put + bear_call on the same name same expiration = an iron condor, which we tested and rejected.\
 \'95  \b Stage 4 \'97 Decline plays out toward trough.\b0  \i Action:\i0  bull_put MTM-1x roll triggers on rollable names (SPX, SPY, QQQ, DIA, WMT, TLT, VNQ); names not on the roll list (XLU, IYR, XLV, KO) hold to expiry and absorb the loss per defined-risk sizing; bear_call positions opened at Stage 3 manage to their exits; IF positions likely hit 50%-profit-target; ZEBRA approaches max loss on names where spot falls below the long-call strike (~13-21% below entry on Tier 1).\
 \'95  \b Stage 5 \'97 Recovery (H1 false-positive zone).\b0  \i Action:\i0  bear_call new entries STOP when SPY closes back above its 200dma. Do not rely on H1 turning off \'97 H1 fires on 19-75% of recovery days because price stays below 200dma well after IVR has compressed. Bull_put and ZEBRA remain in their soft-downsize cadence until BOTH conditions clear (SPY > 200dma AND IVR < 0.5). RSI-14 bullish divergence (validated +4.71% fwd 25-day return) is a candidate confirmation for resuming full-size bull_put deployment but is not yet promoted in the plan; treat as a soft "regime stabilizing" tell, not a deploy trigger.\
 \
@@ -919,7 +937,7 @@ The cohort overlap between bull_put and bear_call covers four names (SPY, QQQ, D
 \'95  \b No bull_put + bear_call on the same name same monthly OpEx expiration.\b0  Wait for the bull_put to close (or roll) before adding bear_call. The bull_put MTM-1x trigger will close most positions naturally during a real bear; non-rollable names hold to expiry, after which the next monthly OpEx is open for bear_call deployment.\
 \'95  \b ZEBRA + bear_call on the same name is undefined, prefer not to layer.\b0  ZEBRA delta is ~+1.0 per contract; adding a 30\uc0\u916  bear_call on the same name reduces net delta to ~+0.70 \'97 a partial trim, not a real hedge. If you want to neutralize ZEBRA delta in a regime change, the right tool is closing or rolling the ZEBRA, not stacking bear_call. Pay friction without buying real protection.\
 \'95  \b ZEBRA + IF on the same name is the natural regime hedge.\b0  ZEBRA is long delta + long gamma; IF is long vega + long gamma (long-vol). In a crash, ZEBRA loses (capped at debit) and IF profits from vol expansion + magnitude. Net: IF leg covers a portion of ZEBRA loss. Not separately tested as a paired book in the v1.6 work, but the structures are aligned and both validated standalone. Treat as a deliberate pairing rule: if ZEBRA is open on a name, an IF entry on the same name + same expiration is encouraged when the IF gate (term inversion) fires.\
-\'95  \b Earnings T1 cohort runs independent of the transition.\b0  The earnings cohort (GOOGL, NUE, META, KO, WFC, RRC, SCCO, CNQ + INTC bear_call + PLTR IF) operates per the per-name calendar; directional bias is name-specific not regime-driven. Continue per the plan even during Stages 1-5.\
+\'95  \b Earnings T1 cohort runs independent of the transition.\b0  The earnings cohorts (COHORT_EARNINGS_BULL_PUT plus the INTC bear_call and PLTR inverted_fly single-name carve-outs) operate per the per-name calendar; directional bias is name-specific not regime-driven. Continue per the plan even during Stages 1-5.\
 \
 \b Timing reality and what the plan accepts\b0\
 \
@@ -1354,4 +1372,14 @@ New trade family added based on a same-day pre-registered backtest. Yield-enhanc
 \'95  \b EX-DIV ASSIGNMENT RISK alert added\b0  to scripts/monitor/daily_alert.py. Fires when an open covered_call position has (a) ex-div within 3 trading days AND (b) short call ITM or within 1% of strike. Forward ex-div projection from yfinance dividend cadence (only fires for confirmed monthly distributors). Filtered to structure='covered_call' \'97 verticals don't have stock to call away. The only mid-cycle decision point on the otherwise hands-off covered call strategy.\
 \'95  \b Position Sizing section gained Covered Call sub-section\b0  parallel to ZEBRA: capital-outlay-based, 5\'9610% of book equity per position, \uc0\u8804  20% total covered-call book-equity allocation. Combined with existing ZEBRA 30% and bull_put + bear_call 15% caps, this leaves \uc0\u8776  35% of book in cash / money market.\
 \'95  Plan version bumped to 1.9.\
+\
+\b v2.0 \'97 2026-04-30 Cohort source-of-truth architecture\b0\
+\
+Architectural change. Same-day after v1.9. Plan no longer embeds deployable cohort enumerations \'97 those live in scripts/qualifier/gate_config.py as the single source of truth. Plan retains selection criteria, per-name backtest evidence as historical research record, and tested-and-excluded names with their reason. Major version bump because the maintenance contract for the document changed: cohort rotations no longer require plan revisions.\
+\
+\'95  \b "Cohort source of truth" subsection added\b0  to the Universe section. Names the seven structure-cohort code constants in gate_config.py and explains the maintenance contract: cohort changes do not warrant plan revisions; structure-level promotion / demotion / methodology changes do. Per-name evidence in the plan is historical record from the test that established the cohort, not a live snapshot.\
+\'95  \b Cohort enumerations replaced with pointers\b0  in: bull_put validated shortlist, bull_put highest-conviction sub-tier (rephrased to remove specific names), bull_put earnings deployment, regime-transition Stage 3 bear_call cohort, ZEBRA Tier 1 / Tier 2 sizing rules, earnings T1 transition note. Earnings TLT exclusion, IF excluded names, ZEBRA excluded list, covered call TLT rejection \'97 all retained because each comes with a documented reason that generalizes.\
+\'95  \b Per-name backtest evidence retained.\b0  ZEBRA Tier 1 / Tier 2 per-name metrics, IF pair + standalone per-name lift numbers, covered call BKLN / JNK / HYG annualized returns are all unchanged \'97 they're research record from the test that established the current cohort. If the cohort rotates, these numbers stay accurate as historical evidence; they do not auto-refresh.\
+\'95  \b No content was removed besides cohort enumerations.\b0  All structure mechanics, signal definitions, regime overrides, regime transition framework, position sizing rules, decision-support infrastructure, glossary, and prior revision log entries are unchanged from v1.9.\
+\'95  Plan version bumped to 2.0.\
 }
