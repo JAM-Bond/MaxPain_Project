@@ -51,12 +51,17 @@ COHORT_EARNINGS_BULL_PUT = [
 COHORT_EARNINGS_BEAR_CALL = ["INTC"]   # single-name carve-out
 COHORT_EARNINGS_INVERTED_FLY = ["PLTR"]  # single-name carve-out
 
-# Covered call on credit ETFs — promoted 2026-04-30 per the
-# project_covered_call_credit_etfs_findings memory. Range-bound credit ETFs
-# with monthly distributions where bull_put credit verticals fail the
-# execution gate (wide bid-ask + coarse $1 strike grid).
-# TLT excluded — fails 2021-2024 walk-forward (rate-hike crash).
-COHORT_COVERED_CALL = ["BKLN", "JNK", "HYG"]
+# Covered call on credit ETFs — DEMOTED 2026-04-30 on live-execution
+# falsification. Backtest validated BKLN / JNK / HYG at slip=0.05 (mean +7.7%
+# / +7.2% / +4.1% annualized), but live attempts on the May 2026 chain showed
+# $0 bids on OTM calls across all three names — no takers at any limit price
+# ≥ mid − $0.125. Realistic slip is $0.30+ below mid, which flips the
+# strategy negative on every name in the cohort. See:
+#   - project_covered_call_credit_etfs_findings.md (live falsification section)
+#   - feedback_backtest_slip_assumption_validation.md
+# Cohort kept as an empty list so the qualifier wiring remains intact; can be
+# re-populated if the strategy is rehabilitated on a different universe.
+COHORT_COVERED_CALL = []
 
 
 # ─── Entry windows (calendar/trading days, per plan) ──────────────────

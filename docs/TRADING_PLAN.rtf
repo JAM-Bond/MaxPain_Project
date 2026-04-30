@@ -8,7 +8,7 @@
 \f0\b\fs36 \cf0 MaxPain Project \'97 Formal Trading Plan\
 \pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\qc\pardirnatural\partightenfactor0
 
-\f1\b0\fs24 \cf0 Version 2.0 \'b7 2026-04-30\
+\f1\b0\fs24 \cf0 Version 2.1 \'b7 2026-04-30\
 \pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
 \cf0 \
 
@@ -513,7 +513,16 @@ Cyclicals and commodity-flow names where the underlying did not sustain a direct
 \'95  Walk-forward on the bottom cohort to confirm the directional-bias-required interpretation \'97 if cyclical names show flat-out positive ZEBRA in a future bull regime, the exclusion list may need revisiting.\
 \'95  Whether ZEBRA on bull_put cohort names (e.g., MSFT, TJX, WMT) outperforms running bull_put on those names per-cycle on a capital-adjusted basis. Different sizing baselines make a direct comparison non-trivial.\
 \
-\f0\b\fs28 Covered Call (Credit ETFs) \'97 Tested 2026-04-30, PROMOTED\
+\f0\b\fs28 Covered Call (Credit ETFs) \'97 PROMOTED 2026-04-30, DEMOTED 2026-04-30 on live-execution falsification\
+
+\f1\b0\fs24 \b ⚠ STRATEGY NOT TRADEABLE.\b0  Backtest validated BKLN / JNK / HYG at slip=0.05 mid (mean +7.7% / +7.2% / +4.1% annualized) and walk-forward stable across four 4-year windows. Same-day live attempts on the May 2026 chain falsified the execution premise: \b OTM calls on all three names showed $0 bids with no takers at limit prices \uc0\u8804  mid \'96 $0.125\b0 . Realistic slip is at least $0.30 below mid, which flips the strategy negative on every name. The 13-year backtest P&L history is operationally inviable. COHORT_COVERED_CALL set to empty list in gate_config.py; qualifier no longer emits covered_call verdicts.\
+\
+The section below is retained as historical research record. The structure mechanics, sizing math, ex-div mechanics, and falsification reasoning are all educationally useful, and the strategy may revive if a different universe (more liquid range-bound names) emerges. The deployment-ready prose below should be read with the falsification banner above held in mind throughout.\
+\
+Lesson generalized: \b backtest slip assumptions on illiquid option chains are unreliable; live execution is the binding test, not the backtest mean.\b0  See feedback_backtest_slip_assumption_validation.md for the methodology rule that resulted from this falsification.\
+\
+
+\f0\b\fs24 \i Historical research record (validated by backtest, falsified by live execution):\i0 \
 
 \f1\b0\fs24 Income / yield-enhancement strategy on range-bound credit ETFs whose options market is too thin for credit verticals to extract premium efficiently. Long stock + short OTM call captures monthly dividend distributions and call premium while the stock stays anchored by structural mechanics (floating-rate senior loans for BKLN; high-yield bond mechanics for JNK / HYG). Validated 2026-04-30 across 132 monthly cycles per name 2013-2026; pre-registration sealed in docs/COVERED_CALL_CREDIT_ETFS_PREREG.md. Closes the long-deferred T5 covered-call line from EARNINGS_PREREG.md.\
 \
@@ -1382,4 +1391,15 @@ Architectural change. Same-day after v1.9. Plan no longer embeds deployable coho
 \'95  \b Per-name backtest evidence retained.\b0  ZEBRA Tier 1 / Tier 2 per-name metrics, IF pair + standalone per-name lift numbers, covered call BKLN / JNK / HYG annualized returns are all unchanged \'97 they're research record from the test that established the current cohort. If the cohort rotates, these numbers stay accurate as historical evidence; they do not auto-refresh.\
 \'95  \b No content was removed besides cohort enumerations.\b0  All structure mechanics, signal definitions, regime overrides, regime transition framework, position sizing rules, decision-support infrastructure, glossary, and prior revision log entries are unchanged from v1.9.\
 \'95  Plan version bumped to 2.0.\
+\
+\b v2.1 \'97 2026-04-30 Covered Call (credit ETFs) DEMOTED on live-execution falsification\b0\
+\
+Same-day reversal of the v1.9 promotion. The fastest research-to-falsification round trip the system has produced \'97 promoted in the morning on backtest evidence, demoted in the afternoon on live execution evidence.\
+\
+\'95  \b Live execution falsified the backtest's slip assumption.\b0  User attempted to sell the short call leg of the covered call on BKLN / JNK / HYG using the May 2026 chain. All three names showed $0 bids on OTM calls at the strikes the qualifier would have selected. Limit orders walked down to mid \'96 $0.125 with no takers. Backtest assumed slip=0.05 mid (~$0.30 fill on a $0.60 mid); reality is slip \uc0\u8805  $0.30 below mid, which flips the strategy negative on every name in the cohort.\
+\'95  \b Cohort emptied in gate_config.py.\b0  COHORT_COVERED_CALL = []. Qualifier wiring intact for potential future revival on a different universe.\
+\'95  \b Section retained as historical research record.\b0  Backtest content, structure mechanics, sizing math, ex-div mechanics, and structural-anchor reasoning all preserved. The section header and an "STRATEGY NOT TRADEABLE" banner make the demotion explicit so the prose below cannot be acted on accidentally.\
+\'95  \b Methodology lesson recorded.\b0  feedback_backtest_slip_assumption_validation.md establishes the rule: any backtest on illiquid option chains requires live-execution validation before live-capital deployment, AND the live test is binding even when the backtest passed walk-forward. Slip assumptions tighter than the actual best-bid-to-mid distance silently overstate edge. Apply going forward to every new structure family; cite when re-running existing backtests.\
+\'95  \b Daily alert EX-DIV ASSIGNMENT RISK section retained.\b0  Currently dormant (no covered_call positions exist); harmless when the cohort is empty; ready if the strategy is rehabilitated. Removing it would require re-implementation if the strategy revives.\
+\'95  Plan version bumped to 2.1.\
 }
