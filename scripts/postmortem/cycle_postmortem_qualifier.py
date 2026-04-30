@@ -5,12 +5,132 @@ Cycle post-mortem — qualifier verdict outcomes + signal accuracy.
 Usage:
   cycle_postmortem_qualifier.py                 # all closed trades
   cycle_postmortem_qualifier.py --opex 2026-05-15
+
+v2 (2026-04-30) adds three sections measuring signal forward-test accuracy:
+  - SIGNAL ACCURACY SCORECARD (per-signal lift vs backtest expected)
+  - DIRECTIONAL OUTCOME vs PREDICTION (SPY realized vs pre-reg)
+  - REGIME SIGNAL FLIPS (cycle-window scoped)
+
+Pre-registration: docs/SIGNAL_VALIDATION_PREREG.md (sealed 2026-04-26).
 """
 import argparse
 import sqlite3
 import sys
+from pathlib import Path
 
 DB_PATH = "/Users/josephmorris/Metal_Project/data/shared/metal_project.db"
+SPY_PARQUET = Path.home() / "MaxPain_Project/data/orats/by_ticker/SPY.parquet"
+
+# ─── Pre-registered backtest expectations (per pre-reg doc) ──────────────────
+# Per-share lifts converted to per-contract ($0.01/share = $1.00/contract for
+# standard 100-mult equity options). Sourced from the named memory entries.
+
+SIGNAL_BACKTEST_EXPECTATIONS = {
+    "bull_put_signal_active": {
+        "structure_match": ("bull_put",),
+        "expected_lift_per_contract":  2.10,   # +$0.021/share
+        "expected_on_per_contract":    1.90,
+        "expected_off_per_contract":  -0.20,
+        "source": "project_mp_phase2f_rescue.md",
+        "claim":  "contango + VRP>0 lifts bull_put cohort mean",
+    },
+    "h1_active": {
+        "structure_match": ("bear_call",),
+        "expected_lift_per_contract": 17.90,   # +$0.179/share (0.092 vs -0.087)
+        "expected_on_per_contract":    9.20,
+        "expected_off_per_contract":  -8.70,
+        "source": "project_bear_call_h1_h3_findings.md",
+        "claim":  "SPY<200dma + IVR>0.5 lifts bear_call cohort mean",
+    },
+    "if_gate_active": {
+        "structure_match": ("inverted_fly",),
+        "expected_lift_per_contract": 44.80,   # 0.639 vs 0.191 = +0.448
+        "expected_on_per_contract":   63.90,
+        "expected_off_per_contract":  19.10,
+        "source": "project_if_phase_a_batch_findings.md",
+        "claim":  "term_inverted lifts inverted_fly cohort mean (3.3× lift)",
+    },
+}
+
+
+# ─── SPY daily signals (used to backfill regime state for trades placed
+#     before the regime_state DB capture began on 2026-04-25) ────────────────
+
+_SPY_DAILY_CACHE = None
+
+
+def load_spy_daily_signals():
+    """Build a daily SPY signals DataFrame from ORATS history.
+
+    Returns df indexed by trade_date with raw values + binary signal columns.
+    Cached after first call. Returns None if SPY parquet missing.
+    """
+    global _SPY_DAILY_CACHE
+    if _SPY_DAILY_CACHE is not None:
+        return _SPY_DAILY_CACHE
+    if not SPY_PARQUET.exists():
+        return None
+    import numpy as np
+    import pandas as pd
+
+    spy = pd.read_parquet(SPY_PARQUET, columns=["trade_date", "expirDate",
+                                                  "stkPx", "delta", "cMidIv"])
+    spy["trade_date"] = pd.to_datetime(spy["trade_date"])
+    spy["exp_dt"] = pd.to_datetime(spy["expirDate"], format="%m/%d/%Y",
+                                    errors="coerce")
+    spy["dte"] = (spy["exp_dt"] - spy["trade_date"]).dt.days
+    spy["delta_dist"] = (spy["delta"] - 0.50).abs()
+
+    front = spy[(spy["dte"] >= 25) & (spy["dte"] <= 35)].sort_values(
+        ["trade_date", "delta_dist"]).drop_duplicates("trade_date")
+    back = spy[(spy["dte"] >= 65) & (spy["dte"] <= 85)].sort_values(
+        ["trade_date", "delta_dist"]).drop_duplicates("trade_date")
+
+    daily = front.set_index("trade_date")[["stkPx", "cMidIv"]].copy()
+    daily.columns = ["close", "atm_iv30"]
+    daily["atm_iv75"] = back.set_index("trade_date")["cMidIv"]
+    daily = daily.sort_index()
+
+    daily["ma200"] = daily["close"].rolling(200, min_periods=100).mean()
+    rmin = daily["atm_iv30"].rolling(252, min_periods=120).min()
+    rmax = daily["atm_iv30"].rolling(252, min_periods=120).max()
+    daily["ivr_252"] = ((daily["atm_iv30"] - rmin)
+                       / (rmax - rmin).replace(0, np.nan))
+    daily["term_spread"] = daily["atm_iv30"] - daily["atm_iv75"]
+    daily["log_ret"] = np.log(daily["close"] / daily["close"].shift(1))
+    daily["rv20"] = daily["log_ret"].rolling(20).std() * np.sqrt(252)
+    daily["vrp"] = daily["atm_iv30"] - daily["rv20"]
+
+    daily["below_200dma"] = (daily["close"] < daily["ma200"]).astype("Int64")
+    daily["ivr_high"] = (daily["ivr_252"] > 0.5).astype("Int64")
+    daily["term_inverted"] = (daily["term_spread"] > 0).astype("Int64")
+    daily["h1_active"] = ((daily["below_200dma"] == 1)
+                         & (daily["ivr_high"] == 1)).astype("Int64")
+    daily["hard_pause_active"] = ((daily["below_200dma"] == 1)
+                                 & (daily["term_inverted"] == 1)
+                                 & (daily["ivr_high"] == 1)).astype("Int64")
+    daily["bull_put_signal_active"] = ((daily["term_spread"] < 0)
+                                      & (daily["vrp"] > 0)).astype("Int64")
+    daily["if_gate_active"] = daily["term_inverted"]
+
+    _SPY_DAILY_CACHE = daily
+    return daily
+
+
+def get_regime_at(spy_daily, date_str):
+    """Look up SPY signal row for a date string. Returns the most recent
+    row at-or-before date_str (handles weekends/holidays). None if missing."""
+    if spy_daily is None or not date_str:
+        return None
+    import pandas as pd
+    try:
+        d = pd.to_datetime(date_str)
+        valid = spy_daily.index[spy_daily.index <= d]
+        if len(valid) == 0:
+            return None
+        return spy_daily.loc[valid[-1]]
+    except Exception:
+        return None
 
 
 def fmt_pct(x):
@@ -156,17 +276,53 @@ def report_signal_state_attribution(cur, opex):
               f"{fmt_money(r['mean_pnl'])}")
 
 
-def report_signal_flips(cur):
-    section_header("REGIME SIGNAL FLIPS (live history, all dates)")
-    rows = cur.execute(
-        """
-        SELECT snapshot_date, stage, h1_active, if_gate_active,
-               bull_put_signal_active, hard_pause_active,
-               soft_downsize_active, below_200dma, term_inverted
-        FROM regime_state
-        ORDER BY snapshot_date
-        """
-    ).fetchall()
+def report_signal_flips(cur, opex=None):
+    """Date-by-date table of regime_state flips. If opex is given, scope to
+    the cycle window [min(entry_date), opex] for placed=1 trades on that
+    cycle. Otherwise show the full live history."""
+    cycle_window = None
+    if opex:
+        cycle_window = cur.execute(
+            """
+            SELECT MIN(entry_date) AS first_entry
+            FROM spread_score_trades
+            WHERE placed = 1 AND opex_date = ?
+            """,
+            (opex,),
+        ).fetchone()
+        if cycle_window and cycle_window["first_entry"]:
+            section_header(
+                f"REGIME SIGNAL FLIPS (cycle window "
+                f"{cycle_window['first_entry']} → {opex})"
+            )
+        else:
+            section_header("REGIME SIGNAL FLIPS (live history, all dates)")
+            cycle_window = None  # fall back to full history
+    else:
+        section_header("REGIME SIGNAL FLIPS (live history, all dates)")
+
+    if cycle_window:
+        rows = cur.execute(
+            """
+            SELECT snapshot_date, stage, h1_active, if_gate_active,
+                   bull_put_signal_active, hard_pause_active,
+                   soft_downsize_active, below_200dma, term_inverted
+            FROM regime_state
+            WHERE snapshot_date BETWEEN ? AND ?
+            ORDER BY snapshot_date
+            """,
+            (cycle_window["first_entry"], opex),
+        ).fetchall()
+    else:
+        rows = cur.execute(
+            """
+            SELECT snapshot_date, stage, h1_active, if_gate_active,
+                   bull_put_signal_active, hard_pause_active,
+                   soft_downsize_active, below_200dma, term_inverted
+            FROM regime_state
+            ORDER BY snapshot_date
+            """
+        ).fetchall()
 
     if not rows:
         print("(no regime_state rows yet)")
@@ -203,6 +359,234 @@ def report_signal_flips(cur):
         print(f"(no flips across {len(rows)} days of regime_state)")
 
 
+def report_signal_accuracy_scorecard(cur, opex):
+    """Per-signal forward-test scorecard against pre-registered backtest lift.
+
+    For each binary signal in SIGNAL_BACKTEST_EXPECTATIONS:
+      - filter trades to relevant structure (e.g. h1_active vs bear_call only)
+      - join to regime_state at entry_date; backfill from SPY ORATS for dates
+        before regime_state DB capture began (2026-04-25)
+      - compute mean P/L, win rate, total per ON/OFF state
+      - compare realized lift to backtest-expected lift
+      - tag VALIDATED / FALSIFIED / NULL per pre-registration discipline
+    """
+    section_header("SIGNAL ACCURACY SCORECARD (forward-test vs pre-reg)")
+
+    where = "AND t.opex_date = ?" if opex else ""
+    params = (opex,) if opex else ()
+    rows = cur.execute(
+        f"""
+        SELECT t.id, t.symbol, t.spread_type, t.entry_date, t.final_pnl,
+               r.bull_put_signal_active, r.h1_active, r.if_gate_active,
+               r.term_inverted, r.below_200dma, r.stage
+        FROM spread_score_trades t
+        LEFT JOIN regime_state r ON r.snapshot_date = t.entry_date
+        WHERE t.status = 'closed' AND t.placed = 1 {where}
+        """,
+        params,
+    ).fetchall()
+
+    if not rows:
+        print("(no closed placed=1 trades in scope)")
+        return
+
+    spy_daily = load_spy_daily_signals()
+    if spy_daily is None:
+        print("⚠ SPY ORATS parquet not found — cannot backfill regime state.")
+        print("  Trades placed before 2026-04-25 will show signal state = unknown.")
+
+    # Backfill missing signal columns from SPY daily where regime_state is null
+    backfill_count = 0
+    trades = []
+    for r in rows:
+        d = dict(r)
+        if d.get("bull_put_signal_active") is None and spy_daily is not None:
+            sig = get_regime_at(spy_daily, d["entry_date"])
+            if sig is not None:
+                d["bull_put_signal_active"] = (
+                    int(sig["bull_put_signal_active"])
+                    if sig["bull_put_signal_active"] is not None else None)
+                d["h1_active"] = (int(sig["h1_active"])
+                                  if sig["h1_active"] is not None else None)
+                d["if_gate_active"] = (int(sig["if_gate_active"])
+                                       if sig["if_gate_active"] is not None else None)
+                d["term_inverted"] = (int(sig["term_inverted"])
+                                      if sig["term_inverted"] is not None else None)
+                d["below_200dma"] = (int(sig["below_200dma"])
+                                     if sig["below_200dma"] is not None else None)
+                backfill_count += 1
+        trades.append(d)
+
+    print(f"  Trades in scope: {len(trades)}  "
+          f"(backfilled signal state from SPY ORATS: {backfill_count})")
+
+    def stats(group):
+        pnls = [t["final_pnl"] for t in group if t["final_pnl"] is not None]
+        if not pnls:
+            return None
+        wins = sum(1 for p in pnls if p > 0)
+        return {
+            "n": len(pnls),
+            "mean": sum(pnls) / len(pnls),
+            "win_rate": wins / len(pnls),
+            "total": sum(pnls),
+        }
+
+    for signal, exp in SIGNAL_BACKTEST_EXPECTATIONS.items():
+        print()
+        print(f"  ── {signal} ───────────────────────────────")
+        print(f"    Claim:  {exp['claim']}")
+        print(f"    Source: {exp['source']}")
+
+        relevant = [t for t in trades if any(
+            sm in (t.get("spread_type") or "") for sm in exp["structure_match"]
+        )]
+        on_grp = [t for t in relevant if t.get(signal) == 1]
+        off_grp = [t for t in relevant if t.get(signal) == 0]
+        unknown = len(relevant) - len(on_grp) - len(off_grp)
+
+        on_s = stats(on_grp)
+        off_s = stats(off_grp)
+
+        n_on = on_s["n"] if on_s else 0
+        n_off = off_s["n"] if off_s else 0
+        print(f"    Relevant trades: {len(relevant)}  "
+              f"(ON={n_on}, OFF={n_off}, unknown_state={unknown})")
+        if on_s:
+            print(f"    ON:  mean=${on_s['mean']:>+8.2f}  "
+                  f"win={on_s['win_rate']*100:>4.0f}%  "
+                  f"total=${on_s['total']:>+9.2f}")
+        if off_s:
+            print(f"    OFF: mean=${off_s['mean']:>+8.2f}  "
+                  f"win={off_s['win_rate']*100:>4.0f}%  "
+                  f"total=${off_s['total']:>+9.2f}")
+
+        if n_on >= 3 and n_off >= 3:
+            realized_lift = on_s["mean"] - off_s["mean"]
+            expected_lift = exp["expected_lift_per_contract"]
+            print(f"    Realized lift (ON-OFF): ${realized_lift:>+.2f}/contract")
+            print(f"    Backtest expected lift: ${expected_lift:>+.2f}/contract")
+            if realized_lift > 0 and expected_lift > 0:
+                verdict = "VALIDATED (directional match)"
+            elif realized_lift < -1 and expected_lift > 0:
+                verdict = "FALSIFIED (sign-flip vs backtest)"
+            else:
+                verdict = "NULL (lift too small to call)"
+            print(f"    Forward-test verdict: {verdict}")
+        else:
+            print(f"    Forward-test verdict: NULL (need N≥3 each cell, "
+                  f"have ON={n_on}, OFF={n_off})")
+
+    # Stage composite — group all trades by entry stage
+    print()
+    print("  ── stage (composite 0-3) ────────────────────")
+    print(f"    Claim:  stage=0 calm/bull, stage=3 H1 bear regime")
+    by_stage = {}
+    for t in trades:
+        stg = t.get("stage")
+        if stg is None and spy_daily is not None:
+            # Stage isn't in our SPY daily df, leave as unknown
+            stg = "unknown"
+        by_stage.setdefault(stg, []).append(t)
+    for stg in sorted(by_stage.keys(),
+                      key=lambda x: (-1 if x == "unknown" else x)):
+        s = stats(by_stage[stg])
+        if s:
+            print(f"    stage={stg!s:>7}: N={s['n']:>3}  "
+                  f"mean=${s['mean']:>+8.2f}  "
+                  f"win={s['win_rate']*100:>4.0f}%  "
+                  f"total=${s['total']:>+9.2f}")
+
+
+def report_directional_outcome(cur, opex):
+    """Compare actual SPY move vs pre-registered prediction at cycle entry."""
+    section_header("DIRECTIONAL OUTCOME vs PREDICTION")
+
+    where = "AND opex_date = ?" if opex else ""
+    params = (opex,) if opex else ()
+    cycle = cur.execute(
+        f"""
+        SELECT MIN(entry_date) AS first_entry, MAX(entry_date) AS last_entry
+        FROM spread_score_trades
+        WHERE placed = 1 {where}
+        """,
+        params,
+    ).fetchone()
+
+    if not cycle or not cycle["first_entry"]:
+        print("(no placed=1 trades for cycle)")
+        return
+
+    spy_daily = load_spy_daily_signals()
+    if spy_daily is None:
+        print("(SPY ORATS unavailable — cannot compute directional outcome)")
+        return
+
+    first = cycle["first_entry"]
+    end_anchor = opex if opex else cycle["last_entry"]
+
+    sig_start = get_regime_at(spy_daily, first)
+    sig_end = get_regime_at(spy_daily, end_anchor)
+    if sig_start is None or sig_end is None:
+        print(f"(SPY signals not available for {first} or {end_anchor})")
+        return
+
+    # Detect whether end_anchor is in the future (cycle still open) — the
+    # lookup will return the most recent at-or-before date in either case.
+    import pandas as pd
+    end_used = sig_end.name.date() if hasattr(sig_end.name, "date") else sig_end.name
+    requested_end = pd.to_datetime(end_anchor).date()
+    cycle_in_progress = end_used < requested_end
+
+    spy_start = float(sig_start["close"])
+    spy_end = float(sig_end["close"])
+    pct_change = (spy_end - spy_start) / spy_start * 100
+
+    print(f"  Cycle entry window first day: {first}")
+    print(f"  Cycle end anchor:             {end_anchor}"
+          f"{' (cycle in progress; using ' + str(end_used) + ')' if cycle_in_progress else ''}")
+    print(f"  SPY at entry:        ${spy_start:>9,.2f}")
+    print(f"  SPY at end:          ${spy_end:>9,.2f}")
+    print(f"  Realized SPY return: {pct_change:>+7.2f}%  "
+          f"(|move| = {abs(pct_change):.2f}%)")
+    print()
+
+    # Pre-reg prediction 1: term_inverted at entry → 20% prob ≥10% in 45d
+    term_inv = bool(sig_start.get("term_inverted") == 1)
+    print(f"  Term spread at entry: {'INVERTED' if term_inv else 'contango'}")
+    if term_inv:
+        print(f"  Pre-reg claim: 20% probability of ≥10% SPY move in 45d "
+              f"(2.6× baseline 7.5%)")
+        if cycle_in_progress:
+            print(f"  Verdict: PROVISIONAL ({abs(pct_change):.2f}% so far; "
+                  f"single cycle = 1/N test of probability)")
+        elif abs(pct_change) >= 10:
+            print(f"  Verdict: VALIDATED (≥10% move occurred)")
+        elif abs(pct_change) >= 5:
+            print(f"  Verdict: PARTIAL ({abs(pct_change):.2f}% move; "
+                  f"didn't hit 10% threshold but moved meaningfully)")
+        else:
+            print(f"  Verdict: NULL (no ≥5% move; single cycle = 1/N)")
+    else:
+        print(f"  Pre-reg claim: contango at entry → quieter forward window")
+        if abs(pct_change) >= 10:
+            print(f"  Verdict: FALSIFIED ({abs(pct_change):.2f}% move under contango)")
+        else:
+            print(f"  Verdict: consistent with claim")
+
+    # Pre-reg prediction 2: stage 0 at entry → no major drawdown
+    below = bool(sig_start.get("below_200dma") == 1)
+    print()
+    print(f"  SPY < 200dma at entry: {'YES' if below else 'no'} "
+          f"(stage 0 expected if no)")
+    if not below:
+        if pct_change <= -5:
+            print(f"  ⚠ Stage-0 entry but realized {pct_change:+.2f}% "
+                  f"— calm-regime assumption breaking down")
+        else:
+            print(f"  Realized {pct_change:+.2f}% — consistent with calm/bull entry")
+
+
 def main(opex):
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -214,7 +598,9 @@ def main(opex):
     report_verdict_outcomes(cur, opex)
     report_counterfactual_skipped(cur, opex)
     report_signal_state_attribution(cur, opex)
-    report_signal_flips(cur)
+    report_signal_accuracy_scorecard(cur, opex)
+    report_directional_outcome(cur, opex)
+    report_signal_flips(cur, opex)
 
     conn.close()
     return 0
