@@ -8,7 +8,7 @@
 \f0\b\fs36 \cf0 MaxPain Project \'97 Formal Trading Plan\
 \pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\qc\pardirnatural\partightenfactor0
 
-\f1\b0\fs24 \cf0 Version 1.7 \'b7 2026-04-25\
+\f1\b0\fs24 \cf0 Version 1.8 \'b7 2026-04-30\
 \pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
 \cf0 \
 
@@ -705,6 +705,24 @@ All sizing rules above apply to paper capital through approximately 2026-08-19. 
 \'95  Do not add new positions even if a high-conviction signal fires. Wait for an exit or roll to free budget.\
 \'95  Do not oversize to chase an attractive setup. The discipline is the edge.\
 \
+\b Loss-cap discipline (2x rule)\b0\
+\
+A position's max realized loss must not exceed 2x its target win. This is a structural quality gate at trade selection time, not a stop-loss rule. For credit verticals, target win = entry credit and max loss = wing \'97 credit, so the rule reduces to credit / wing \uc0\u8805 0.333 (max loss \uc0\u8804 2x credit means wing \uc0\u8804 3x credit).\
+\
+The rule excludes structurally bad trades \'97 trades where you risk $4 to make $1, where one loss eats four wins. The 2x cap matches the empirical loss/win ratio implied by managed-exit win rates around 70-80%: a 75% cohort with 1:1 risk/reward breaks even, while 2:1 requires a 67% win rate to break even, which the validated cohorts clear by 5-15 points.\
+\
+spread_score_tracker.py MIN_CREDIT_WIDTH was raised from 0.35 to 0.50 on 2026-04-28 to enforce credit/wing \uc0\u8805 0.50 at scan time. New entries below this threshold do not earn GO verdicts. Existing trades that violate the rule are not retroactively closed.\
+\
+ZEBRA does not reduce to credit/wing math (debit structure, no fixed wing). MTM-stop discipline for ZEBRA is the next layer; not yet specified.\
+\
+\b Expensive names \'97 verticals only\b0\
+\
+Stocks priced above approximately $100 spot get credit verticals only; ZEBRA, inverted fly, and Jade Lizard structures are reserved for sub-$100 names. Personal-trading budget rule established 2026-04-28, not a backtest finding.\
+\
+ZEBRA on a $200 spot is a $14K-$20K capital outlay per contract; an inverted fly at 10% wings on a $200 spot is a $2K-$3K debit per contract; both are uneconomic on a paper-test or small live book. Verticals scale linearly with strike width regardless of spot, so a $5-wide bull_put on a $200 stock is the same ~$500 max loss as a $5-wide bull_put on a $50 stock.\
+\
+Exception: index ETFs (SPY, QQQ, DIA, IWM) and SPX trade above $100 but are explicitly retained for ZEBRA Tier 1 and IF pair-book duty \'97 index-level capital outlay is acceptable per the ZEBRA capital-outlay framework. The rule applies to high-priced single-name equities specifically: NVDA / GOOGL / META at $200+ are excluded from IF and Jade Lizard but remain in ZEBRA Tier 1 because the structure is purpose-built for high-priced underlyings.\
+\
 
 \f0\b\fs28 Regime Overrides\
 
@@ -853,6 +871,39 @@ The 9:20 ET research-cohort capture cron (research_cohort_snapshot.py) is extend
 \'95  Force-close existing positions on any signal. Existing positions run to their structure-specific exit rules. Regime transition affects NEW entries and SIZING, not forced closures of in-flight cycles.\
 \'95  Add a "panic mode" override. There is no rule in the plan for closing an entire book on a single signal. The structural sizing rules (max-loss caps, ZEBRA capital outlay caps) carry the tail-risk discipline; regime transition adjusts the entry mix without touching the existing book.\
 \'95  Specify a hedging ratio. The IF + ZEBRA pairing is a directional pairing, not a delta-neutral hedge. The book remains net-directional; regime transition adjusts net direction over a 4-8 week period as old positions close and new positions of opposite tilt come on.\
+\
+
+\f0\b\fs28 Decision Support Infrastructure\
+
+\f1\b0\fs24 This section describes the operational tooling that supports day-to-day decisions against the rules above. The plan is the standard; the tools enforce the standard at qualifier time, post-mortem time, and daily-alert time.\
+\
+\b Cycle qualifier (daily 9:25 ET cron)\b0\
+\
+scripts/qualifier/cycle_qualifier.py runs each weekday morning, reads the current regime_state, computes per-symbol per-structure verdicts (GO, DOWNSIZE, PENDING, SKIP, PAUSE), and persists results to cycle_qualifier_runs in metal_project.db plus a dated parquet. Implements every gate in this plan: bull_put signal gate (contango + VRP > 0), bear_call H1 gate (SPY < 200dma + IVR > 0.5), IF term-inversion gate, ZEBRA 75-DTE entry, earnings-track T-1 / T-3 calendar matching, soft-downsize and hard-pause triggers, and per-name overrides (GOOGL no-IF-gate, SCCO and CNQ T-1 earnings entry).\
+\
+\b Earnings-in-holding-window gate.\b0  The qualifier also enforces the plan rule "no binary earnings inside the DTE window" \'97 for every non-earnings-bias structure, if any earnings event for the symbol falls in [target, opex] inclusive, the verdict is downgraded to SKIP. Earnings-bias structures (the *_earnings cohorts) bypass the gate by design, since their holding window straddles the earnings event on purpose.\
+\
+\b Cycle post-mortem (run at OpEx close)\b0\
+\
+scripts/postmortem/cycle_postmortem_qualifier.py is the audit step run after a cycle closes. It produces six sections: VERDICT OUTCOMES (split actual book vs algo recs), COUNTERFACTUAL (GO verdicts not taken), PER-TRADE SIGNAL-STATE ATTRIBUTION (signal at entry x outcome), SIGNAL ACCURACY SCORECARD (forward-test of each signal vs pre-registered backtest expected lift, with VALIDATED / FALSIFIED / NULL verdicts), DIRECTIONAL OUTCOME vs PREDICTION (SPY realized return vs term-spread / 200dma claims), and REGIME SIGNAL FLIPS (cycle-window scoped). Backfills regime state from SPY ORATS for trades placed before regime_state DB capture began on 2026-04-25.\
+\
+\b Pre-registration discipline.\b0  The signal accuracy scorecard tags VALIDATED / FALSIFIED / NULL against pre-registered claims sealed in docs/SIGNAL_VALIDATION_PREREG.md (2026-04-26). The discipline is that retroactive rationalization cannot promote a NULL into a VALIDATED \'97 the pre-reg is the standard.\
+\
+\b Daily alert (4:45 PM ET cron)\b0\
+\
+scripts/monitor/daily_alert.py runs at 4:45 PM ET each weekday and emits a focused multi-section summary of the day's actionable items. Replaced the prior gamma-noise alert (Metal_Project) with empirical p95 thresholds per ticker and fresh-breach-only logic. Sections, in firing order:\
+\
+\'95  REGIME \'97 stage, SPY/200dma, IVR, VIX, gate states.\
+\'95  APPROACHING THRESHOLDS \'97 informational on near-trigger signals.\
+\'95  OPEN TRADES \'97 big moves, FRESH strike breaches, deeper-into-breach moves.\
+\'95  ASSIGNMENT ZONE WARNING \'97 open verticals where spot is between strikes AND DTE \uc0\u8804 5. Per project_assignment_zone_friction.md: the zone where one leg gets assigned (100 shares at the short strike) and the other expires worthless. The held-to-expiry backtest engine assumes cash-equivalent settlement and does not model this friction; the alert provides the early warning so the trade can be closed intraday.\
+\'95  ENTRY WINDOW APPROACHING \'97 fires from D-3 through entry day for every Window A / Window B / earnings T-1/T-3 entry. Groups by (window, opex, target).\
+\'95  EARNINGS RISK \'97 lists open positions where earnings are inside the holding window.\
+\'95  52-WEEK EXTREME CONTEXT \'97 tags any open position whose underlying is within 5% of its trailing-252-day high or low. Regime context, not actionable as a filter (the 52w-extreme signal was tested as a selection filter and rejected per project_52w_extremes_rejected.md).\
+\'95  IF COHORT AT 52W LOWS \'97 lists IF cohort names currently at 52w lows. Long-vol setup confirmation; informational only.\
+\'95  DTE CHECKPOINTS \'97 profit-target hits, T-X warning windows, OpEx-week consolidation.\
+\
+When all sections are empty, the alert prints "All quiet \'97 no alerts."\
 \
 
 \f0\b\fs28 What Doesn\'92t Work (Caveats for bull_put and bear_call)\
@@ -1210,4 +1261,18 @@ Added the Regime Transition section between Regime Overrides and What Doesn't Wo
 \'95  \b H1 alignment audit (2026-04-25)\b0  on the SPY ORATS history confirmed H1 is high-precision (97.6% of all H1 fires inside a real bear event, only 7 false-positive days in 13 years) and moderate-recall (catches ~50% of -10% drawdown days; misses slow-grind declines like 2018Q1 and 2023). Lead time T-25 to T-50 trading days on fast bears, useless on slow grinds. Recovery side: H1 false-positives 19-75% of recovery days \'97 motivates the explicit Stage 5 SPY-above-200dma cutoff for stopping bear_call deployment.\
 \'95  \b Daily regime-state tracking added to the 9:20 ET cron.\b0  research_cohort_snapshot.py extended to compute SPY 200dma, IVR_252, and the resulting stage classification, persisted into a new regime_state table in metal_project.db. The cycle qualifier (build window 2026-05-01 to 2026-05-04) will read this state to populate the per-symbol GO/PAUSE/DOWNSIZE grid before each entry day. No new cron job; existing cron is extended.\
 \'95  Plan version bumped to 1.7.\
+\
+\b v1.8 \'97 2026-04-30 Operational tooling deployed; risk-discipline updates\b0\
+\
+Five-day arc closing the operational gap between v1.7 (rules written) and a working day-to-day trading system (rules enforced and audited). Plan adds a "Decision Support Infrastructure" section, two new sub-sections in Position Sizing, one rejected research finding, and a v1.8 stamp.\
+\
+\'95  \b Cycle qualifier deployed.\b0  The qualifier described in v1.7 as "build window 2026-05-01 to 2026-05-04" was built early on 2026-04-25 and has run daily 9:25 ET since. First production run produced 74 verdicts (3 GO, 39 PENDING, 32 SKIP). All v1.7 gates implemented (bull_put signal, H1, IF term-inv, ZEBRA, earnings T-1/T-3, soft/hard regime overrides, per-name overrides). Detail memory: reference_cycle_qualifier_v1.md.\
+\'95  \b Earnings-in-holding-window gate added to qualifier.\b0  Codifies the plan rule "no binary earnings inside the DTE window" as a runtime gate in evaluate_opex_cell. For non-earnings-bias structures, SKIP fires when any earnings event for the symbol falls in [target, opex] inclusive. First production run flagged 12 SKIPs from real upcoming earnings (WMT/BABA/AMD/NVDA/GOLD blocked from inverted_fly entries; NVDA/TJX/GE/WMT/AMD/PLTR blocked from ZEBRA).\
+\'95  \b Signal validation v2 scorecard built.\b0  Heavy extension to cycle_postmortem_qualifier.py: per-signal forward-test scorecard with VALIDATED / FALSIFIED / NULL verdicts against pre-registered claims (docs/SIGNAL_VALIDATION_PREREG.md, sealed 2026-04-26). Backfills regime state from SPY ORATS history for trades placed before regime_state DB capture began on 2026-04-25. First-cycle output is correctly NULL across all signals \'97 every May 15 trade entered with all gates OFF, exactly as the pre-reg predicted. June OpEx is the first cycle that can forward-test gated trades. Detail: project_signal_validation_v2_plan.md.\
+\'95  \b Daily alert overhauled.\b0  Replaced Metal_Project's gamma-noise alert with focused MaxPain version: nine sections including the new ASSIGNMENT ZONE WARNING (per project_assignment_zone_friction.md \'97 the held-to-expiry backtest blind spot the alert closes), ENTRY WINDOW APPROACHING (covers Window A 45-DTE managed and Window B T-5 with the same lead-time logic), EARNINGS RISK (open positions whose earnings fall inside the holding window), 52-WEEK EXTREME CONTEXT (regime tagging on open positions, 5% threshold), and IF COHORT AT 52W LOWS (long-vol setup confirmation). Empirical p95 thresholds per ticker; fresh-breach-only logic. Sample run: 8 actionable events from 68 positions vs the prior alert's typical 30-50 mostly-noise events.\
+\'95  \b Loss-cap discipline (2x rule) added to Position Sizing.\b0  Max realized loss must not exceed 2x target win at trade-selection time; reduces to credit/wing \uc0\u8805 0.333 for credit verticals. spread_score_tracker MIN_CREDIT_WIDTH raised from 0.35 to 0.50 on 2026-04-28 to enforce. Detail memory: feedback_loss_cap_discipline.md.\
+\'95  \b Expensive-names rule added to Position Sizing.\b0  Stocks above approximately $100 spot get credit verticals only; ZEBRA, IF, and Jade Lizard reserved for sub-$100 names (with index-ETF carve-outs for ZEBRA Tier 1 and IF pair-book duty). Personal-trading budget rule, not a backtest finding. Detail memory: feedback_expensive_names_verticals_only.md.\
+\'95  \b 52-week extremes signal TESTED, REJECTED as filter.\b0  Universe-level +6pp lift on bull_put / bear_call collapsed to +0.4pp under cohort-restriction (cohort baseline already 86%); walk-forward dead since 2017. Pattern lesson: always condition universe-level findings on the actual cohort baseline AND walk-forward before promoting. Events parquet retained for regime-context tagging only (52w-extreme tagging on open positions and IF cohort 52w-low screening). Detail: project_52w_extremes_rejected.md.\
+\'95  \b Decision Support Infrastructure section added\b0  describing the qualifier, post-mortem, and daily alert capabilities. Placed before "What Doesn't Work" \'97 the operational layer that enforces the rules above.\
+\'95  Plan version bumped to 1.8.\
 }
