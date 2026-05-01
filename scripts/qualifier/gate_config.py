@@ -42,6 +42,7 @@ COHORT_ZEBRA_TIER1 = [
 
 COHORT_ZEBRA_TIER2 = [
     "DIA", "IWM", "GLD", "TJX", "GE", "WMT", "AMD", "PLTR",
+    "KRE",  # promoted 2026-05-01 via universe expansion (see ZEBRA_UNIVERSE_EXPANSION_PREREG.md)
 ]
 
 # Earnings — promoted in v1.6
@@ -92,6 +93,28 @@ ENTRY_WINDOW_TOLERANCE = 1
 SIZE_DEFAULT = 1.0
 SIZE_DOWNSIZE = 0.5      # soft-downsize trigger fires
 SIZE_PAUSE = 0.0         # hard-pause trigger fires
+
+
+# ─── Budget caps (capital-outlay structures only) ─────────────────────
+#
+# Per feedback_expensive_names_verticals_only.md (2026-04-28): stocks at or
+# above this spot price get credit verticals only. ZEBRA and IF reserve
+# capital outlay for sub-cap names. Credit verticals are NOT gated here —
+# bull_put on SPY at $580 with $0.50 width is fine.
+#
+# Threshold is a parameter, not a constant of nature: bump if book equity
+# grows.
+
+MAX_SPOT_ZEBRA = 100.0
+MAX_SPOT_INVERTED_FLY = 100.0
+
+BUDGET_CAPS = {
+    "zebra_tier1": MAX_SPOT_ZEBRA,
+    "zebra_tier2": MAX_SPOT_ZEBRA,
+    "inverted_fly_pair": MAX_SPOT_INVERTED_FLY,
+    "inverted_fly_single": MAX_SPOT_INVERTED_FLY,
+    "inverted_fly_earnings": MAX_SPOT_INVERTED_FLY,
+}
 
 
 # ─── Per-name overrides ───────────────────────────────────────────────

@@ -26,14 +26,17 @@ First production runs:
 from __future__ import annotations
 
 import argparse
+import logging
 import sqlite3
 import sys
 from datetime import date, datetime
 from pathlib import Path
 
 import pandas as pd
+import requests
 
 sys.path.insert(0, str(Path.home() / "MaxPain_Project"))
+sys.path.insert(0, str(Path.home() / "Metal_Project"))  # for Schwab.auth
 from lib.opex_calendar import (  # noqa: E402
     current_opex, next_n_opexes, trading_day_offset, trading_days_between,
     calendar_days_before,
@@ -41,10 +44,63 @@ from lib.opex_calendar import (  # noqa: E402
 from scripts.qualifier import gate_config as G  # noqa: E402
 from scripts.qualifier.earnings_calendar import upcoming_earnings  # noqa: E402
 
+log = logging.getLogger(__name__)
+
 ROOT = Path.home() / "MaxPain_Project"
 DB_PATH = Path.home() / "Metal_Project/data/shared/metal_project.db"
 COHORT_PATH = ROOT / "data/profile/research_cohort_v15.parquet"
 QUALIFIER_DIR = ROOT / "data/qualifier"
+
+
+# ─── Live spot lookup for budget-cap gate ─────────────────────────────
+
+def fetch_schwab_spots(symbols: list[str]) -> dict[str, float]:
+    """Bulk live quote fetch from Schwab /marketdata/v1/quotes.
+
+    Used by the budget-cap gate (G.BUDGET_CAPS) to apply the
+    expensive-names → verticals-only rule from
+    feedback_expensive_names_verticals_only.md.
+
+    Returns {symbol: lastPrice}. Returns empty dict on auth failure — the
+    caller falls back to "no budget gate" behavior so the qualifier never
+    fails closed on a Schwab outage.
+    """
+    if not symbols:
+        return {}
+    try:
+        from Schwab.auth import get_valid_token
+    except Exception as e:
+        log.warning("Schwab auth import failed; budget gate disabled: %s", e)
+        return {}
+    try:
+        token = get_valid_token()
+    except Exception as e:
+        log.warning("Schwab token fetch failed; budget gate disabled: %s", e)
+        return {}
+
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    url = "https://api.schwabapi.com/marketdata/v1/quotes"
+    out = {}
+    CHUNK = 50
+    for i in range(0, len(symbols), CHUNK):
+        chunk = symbols[i : i + CHUNK]
+        try:
+            resp = requests.get(
+                url, headers=headers,
+                params={"symbols": ",".join(chunk), "fields": "quote"},
+                timeout=20,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as e:
+            log.warning("Schwab /quotes chunk %d failed: %s", i, e)
+            continue
+        for sym, info in data.items():
+            quote = info.get("quote", {})
+            px = quote.get("lastPrice") or quote.get("regularMarketLastPrice")
+            if px:
+                out[sym.upper()] = float(px)
+    return out
 
 
 # ─── Regime state loader ──────────────────────────────────────────────
@@ -144,7 +200,8 @@ def compute_window_targets(run_date: date) -> dict:
 def evaluate_opex_cell(symbol: str, structure: str, window_label: str,
                        target: date, opex: date, days_until: int,
                        regime: dict, run_date: date,
-                       earnings_dates: list[date] | None = None) -> dict:
+                       earnings_dates: list[date] | None = None,
+                       spots: dict[str, float] | None = None) -> dict:
     """Apply gate + window logic to one (symbol, structure, window) tuple.
 
     Returns a row dict with fields: symbol, structure, window, target, opex,
@@ -162,6 +219,18 @@ def evaluate_opex_cell(symbol: str, structure: str, window_label: str,
         row["verdict"] = G.VERDICT_SKIP
         row["reason"] = f"target {target} already past"
         return row
+
+    # 0.5 Budget cap (capital-outlay structures only).
+    # Per feedback_expensive_names_verticals_only.md: ZEBRA / IF reserved
+    # for sub-cap names. Skipped silently when spot is unavailable so a
+    # Schwab outage does not fail the qualifier closed.
+    cap = G.BUDGET_CAPS.get(structure)
+    if cap is not None and spots:
+        spot = spots.get(symbol)
+        if spot is not None and spot > cap:
+            row["verdict"] = G.VERDICT_SKIP
+            row["reason"] = f"spot ${spot:.2f} > ${cap:.0f} budget cap ({structure})"
+            return row
 
     # 1. Hard-pause check (bull_put only)
     if structure.startswith("bull_put") and not structure.endswith("_earnings"):
@@ -262,7 +331,8 @@ def load_cohort_earnings(run_date: date) -> dict[str, list[date]]:
 
 
 def build_opex_verdicts(regime: dict, windows: dict, run_date: date,
-                         earnings_by_sym: dict[str, list[date]]) -> list[dict]:
+                         earnings_by_sym: dict[str, list[date]],
+                         spots: dict[str, float] | None = None) -> list[dict]:
     """For each OpEx-anchored structure, generate one row per (symbol, window)."""
     if regime is None:
         return []
@@ -277,14 +347,14 @@ def build_opex_verdicts(regime: dict, windows: dict, run_date: date,
         for sym in G.COHORT_BULL_PUT:
             rows.append(evaluate_opex_cell(
                 sym, "bull_put", "45-DTE-managed (Window A)",
-                target, opex, days_until, regime, run_date, ed(sym),
+                target, opex, days_until, regime, run_date, ed(sym), spots,
             ))
     if "bull_put_t5" in windows:
         target, opex, days_until = windows["bull_put_t5"]
         for sym in G.COHORT_BULL_PUT:
             rows.append(evaluate_opex_cell(
                 sym, "bull_put", "T-5 (Window B)",
-                target, opex, days_until, regime, run_date, ed(sym),
+                target, opex, days_until, regime, run_date, ed(sym), spots,
             ))
 
     # Bear call — 45-DTE only
@@ -295,7 +365,7 @@ def build_opex_verdicts(regime: dict, windows: dict, run_date: date,
                 continue
             rows.append(evaluate_opex_cell(
                 sym, "bear_call", "45-DTE",
-                target, opex, days_until, regime, run_date, ed(sym),
+                target, opex, days_until, regime, run_date, ed(sym), spots,
             ))
 
     # Inverted fly — pair + singles, 45-DTE
@@ -306,12 +376,12 @@ def build_opex_verdicts(regime: dict, windows: dict, run_date: date,
                 continue
             rows.append(evaluate_opex_cell(
                 sym, "inverted_fly_pair", "45-DTE",
-                target, opex, days_until, regime, run_date, ed(sym),
+                target, opex, days_until, regime, run_date, ed(sym), spots,
             ))
         for sym in G.COHORT_INVERTED_FLY_SINGLE:
             rows.append(evaluate_opex_cell(
                 sym, "inverted_fly_single", "45-DTE",
-                target, opex, days_until, regime, run_date, ed(sym),
+                target, opex, days_until, regime, run_date, ed(sym), spots,
             ))
 
     # ZEBRA — Tier 1 + Tier 2, 75-DTE
@@ -320,12 +390,12 @@ def build_opex_verdicts(regime: dict, windows: dict, run_date: date,
         for sym in G.COHORT_ZEBRA_TIER1:
             rows.append(evaluate_opex_cell(
                 sym, "zebra_tier1", "75-DTE",
-                target, opex, days_until, regime, run_date, ed(sym),
+                target, opex, days_until, regime, run_date, ed(sym), spots,
             ))
         for sym in G.COHORT_ZEBRA_TIER2:
             rows.append(evaluate_opex_cell(
                 sym, "zebra_tier2", "75-DTE",
-                target, opex, days_until, regime, run_date, ed(sym),
+                target, opex, days_until, regime, run_date, ed(sym), spots,
             ))
 
     # Covered call — credit ETFs (BKLN/JNK/HYG), monthly cycle
@@ -336,14 +406,15 @@ def build_opex_verdicts(regime: dict, windows: dict, run_date: date,
         for sym in G.COHORT_COVERED_CALL:
             rows.append(evaluate_opex_cell(
                 sym, "covered_call", "monthly (post-OpEx entry)",
-                target, opex, days_until, regime, run_date, ed(sym),
+                target, opex, days_until, regime, run_date, ed(sym), spots,
             ))
 
     return rows
 
 
 def evaluate_earnings_cell(symbol: str, structure: str, earnings_date: date,
-                            run_date: date, days_before: int) -> dict:
+                            run_date: date, days_before: int,
+                            spots: dict[str, float] | None = None) -> dict:
     """Earnings-track verdict: GO if today is exactly T-N before earnings,
     PENDING if upcoming within tolerance window, SKIP otherwise.
 
@@ -366,6 +437,15 @@ def evaluate_earnings_cell(symbol: str, structure: str, earnings_date: date,
         "days_until": days_until, "verdict": None, "size": 0.0, "reason": "",
     }
 
+    # Budget cap (capital-outlay structures only — inverted_fly_earnings).
+    cap = G.BUDGET_CAPS.get(structure)
+    if cap is not None and spots:
+        spot = spots.get(symbol)
+        if spot is not None and spot > cap:
+            row["verdict"] = G.VERDICT_SKIP
+            row["reason"] = f"spot ${spot:.2f} > ${cap:.0f} budget cap ({structure})"
+            return row
+
     if target < run_date:
         row["verdict"] = G.VERDICT_SKIP
         row["reason"] = f"target {target} already past"
@@ -387,7 +467,8 @@ def evaluate_earnings_cell(symbol: str, structure: str, earnings_date: date,
     return row
 
 
-def build_earnings_verdicts(run_date: date) -> list[dict]:
+def build_earnings_verdicts(run_date: date,
+                             spots: dict[str, float] | None = None) -> list[dict]:
     """Look up upcoming earnings for the three earnings cohorts and emit verdicts."""
     all_earnings_names = sorted(set(
         G.COHORT_EARNINGS_BULL_PUT
@@ -409,19 +490,19 @@ def build_earnings_verdicts(run_date: date) -> list[dict]:
                            if sym in G.EARNINGS_T1_NAMES
                            else G.WINDOW_EARNINGS_T3)
             rows.append(evaluate_earnings_cell(
-                sym, "bull_put_earnings", ed, run_date, days_before
+                sym, "bull_put_earnings", ed, run_date, days_before, spots
             ))
 
         # INTC bear_call earnings (T-1)
         if sym in G.COHORT_EARNINGS_BEAR_CALL:
             rows.append(evaluate_earnings_cell(
-                sym, "bear_call_earnings", ed, run_date, G.WINDOW_EARNINGS_T1
+                sym, "bear_call_earnings", ed, run_date, G.WINDOW_EARNINGS_T1, spots
             ))
 
         # PLTR inverted_fly earnings (T-3)
         if sym in G.COHORT_EARNINGS_INVERTED_FLY:
             rows.append(evaluate_earnings_cell(
-                sym, "inverted_fly_earnings", ed, run_date, G.WINDOW_EARNINGS_T3
+                sym, "inverted_fly_earnings", ed, run_date, G.WINDOW_EARNINGS_T3, spots
             ))
 
     return rows
@@ -623,11 +704,22 @@ def main():
     regime = load_regime_state(run_date)
     windows = compute_window_targets(run_date)
     earnings_by_sym = load_cohort_earnings(run_date)
+
+    # Live spots for the budget-cap gate (ZEBRA + IF only). Single bulk call.
+    budget_gated_syms = sorted(set(
+        G.COHORT_ZEBRA_TIER1
+        + G.COHORT_ZEBRA_TIER2
+        + G.COHORT_INVERTED_FLY_PAIR
+        + G.COHORT_INVERTED_FLY_SINGLE
+        + G.COHORT_EARNINGS_INVERTED_FLY
+    ))
+    spots = fetch_schwab_spots(budget_gated_syms)
+
     opex_rows = (
-        build_opex_verdicts(regime, windows, run_date, earnings_by_sym)
+        build_opex_verdicts(regime, windows, run_date, earnings_by_sym, spots)
         if regime else []
     )
-    earnings_rows = build_earnings_verdicts(run_date)
+    earnings_rows = build_earnings_verdicts(run_date, spots)
     verdict_rows = opex_rows + earnings_rows
 
     print()

@@ -85,6 +85,102 @@ def _parse_exp_date_map(exp_date_map: dict) -> list[dict]:
     return rows
 
 
+def fetch_chain_with_greeks(symbol: str, expiry: str, dte_tolerance_days: int = 3):
+    """Fetch Schwab chain in the COLUMN FORMAT expected by structures.py
+    (open_zebra / open_inverted_fly / open_bull_put / open_bear_call etc).
+
+    Returns a single DataFrame with columns:
+      strike, delta, cMidIv, pMidIv, cBidPx, cAskPx, pBidPx, pAskPx, stkPx
+
+    Schwab's expiration convention varies — some products list the Thursday
+    before OpEx (last-trading-day), others the Friday itself. The tolerance
+    window snaps to the listed expiration closest to the requested date.
+
+    Returns (df, spot) or (None, None) on failure.
+    """
+    import pandas as pd
+    from datetime import date as _date, datetime, timedelta
+
+    target = datetime.strptime(expiry, "%Y-%m-%d").date()
+    range_lo = (target - timedelta(days=dte_tolerance_days)).isoformat()
+    range_hi = (target + timedelta(days=dte_tolerance_days)).isoformat()
+
+    # Single API call across the tolerance window; pick the closest listed expiration
+    try:
+        token = get_valid_token()
+    except Exception as e:
+        print(f"    Schwab auth failed: {e}")
+        return None, None
+    try:
+        resp = requests.get(
+            CHAINS_URL,
+            headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+            params={"symbol": symbol, "contractType": "ALL",
+                    "fromDate": range_lo, "toDate": range_hi, "strikeCount": 500},
+            timeout=20,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as e:
+        print(f"    Schwab chain request failed for {symbol}: {e}")
+        return None, None
+
+    spot_raw = data.get("underlyingPrice")
+    if not spot_raw or float(spot_raw) <= 0:
+        u = data.get("underlying") or {}
+        spot_raw = u.get("last") if isinstance(u, dict) else None
+    if not spot_raw or float(spot_raw) <= 0:
+        return None, None
+    spot = float(spot_raw)
+
+    # Pick the expiration key (format "YYYY-MM-DD:DTE") closest to target
+    cmap = data.get("callExpDateMap", {}) or {}
+    pmap = data.get("putExpDateMap", {}) or {}
+    all_keys = set(cmap.keys()) | set(pmap.keys())
+    if not all_keys:
+        return None, None
+
+    def _key_to_date(k: str) -> _date:
+        return datetime.strptime(k.split(":")[0], "%Y-%m-%d").date()
+
+    chosen_key = min(all_keys, key=lambda k: abs((_key_to_date(k) - target).days))
+    chosen_cmap = {chosen_key: cmap[chosen_key]} if chosen_key in cmap else {}
+    chosen_pmap = {chosen_key: pmap[chosen_key]} if chosen_key in pmap else {}
+
+    def _rows(exp_map: dict) -> list[dict]:
+        out = []
+        for _exp_key, strikes in exp_map.items():
+            for _strike_str, contracts in strikes.items():
+                for c in contracts:
+                    out.append({
+                        "strike": float(c.get("strikePrice", 0)),
+                        "bid": float(c.get("bid", 0)),
+                        "ask": float(c.get("ask", 0)),
+                        "iv": float(c.get("volatility", 0)) / 100.0,
+                        "delta": float(c.get("delta", 0)),
+                    })
+        return out
+
+    calls = pd.DataFrame(_rows(chosen_cmap))
+    puts = pd.DataFrame(_rows(chosen_pmap))
+    if calls.empty or puts.empty:
+        return None, None
+
+    # Rename for joined-chain naming
+    calls = calls.rename(columns={"bid": "cBidPx", "ask": "cAskPx", "iv": "cMidIv"})
+    puts = puts.rename(columns={"bid": "pBidPx", "ask": "pAskPx", "iv": "pMidIv",
+                                "delta": "pDelta"})
+
+    # Outer join on strike so all strikes appear; structures.py uses call delta primarily
+    merged = calls.merge(puts, on="strike", how="outer").sort_values("strike").reset_index(drop=True)
+    merged["stkPx"] = spot
+    # structures.py select_by_delta filters on "delta" (call delta convention).
+    # Keep "delta" as call delta; pDelta carried separately for put-side selection if needed.
+    if "delta" not in merged.columns:
+        merged["delta"] = float("nan")
+    return merged, spot
+
+
 def fetch_option_chain(symbol: str, expiry: str):
     """
     Fetch option chain from Schwab and return (calls_df, puts_df, price)
