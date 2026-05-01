@@ -35,6 +35,19 @@ from lib.schwab_options import fetch_chain_with_greeks  # noqa: E402
 from structures import (  # noqa: E402
     open_zebra, open_inverted_fly, open_bull_put, open_bear_call,
 )
+import config as _bt_config  # noqa: E402
+
+# Match the backtest's effective pricing for SELECTION. The backtest's
+# 95% fire rate + 1.05-1.15 entry-delta range (per project_zebra_findings)
+# was achieved with ORATS-clean mids; live bidask/slip pricing is
+# meaningfully more conservative on names with wide spreads (e.g. KRE
+# 75-DTE deep ITM has $2.50 spreads = 38% of mid), which can push
+# selection to deeper-ITM strikes than the validated cohort.
+#
+# Decision: select on mid (so live picks match validated selections),
+# display real bid/ask in the construction block so user sees actual
+# execution slippage.
+_bt_config.activate_v2()  # PRICING_MODE = "mid"
 
 
 # ─── Routing: structure name → open_* helper ──────────────────────────
