@@ -945,7 +945,9 @@ def build_construction_enrichment(conn) -> tuple[str, list[str]]:
         return "", []
 
     # Lazy import — only when actionable rows exist (saves cron startup time)
-    from scripts.monitor.trade_construction import build_construction_block
+    from scripts.monitor.trade_construction import (
+        build_construction_block, build_zebra_protected_block,
+    )
 
     text_parts = []
     html_parts = []
@@ -962,6 +964,17 @@ def build_construction_enrichment(conn) -> tuple[str, list[str]]:
         text_parts.append(result["text"])
         text_parts.append("")
         html_parts.append(result["html"])
+
+        # For ZEBRA rows, also render the zebra_protected variant so the user
+        # can compare base vs hedged side-by-side in the same alert.
+        if r["structure"].startswith("zebra"):
+            prot = build_zebra_protected_block(r["symbol"], r["opex"])
+            if prot["ok"]:
+                text_parts.append(prot["text"])
+                text_parts.append("")
+                html_parts.append(prot["html"])
+            else:
+                text_parts.append(f"  ⚠ {r['symbol']} zebra_protected: {prot['error']}")
 
     return "\n".join(text_parts), html_parts
 

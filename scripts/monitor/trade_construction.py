@@ -32,6 +32,7 @@ sys.path.insert(0, str(METAL_ROOT))
 sys.path.insert(0, str(BACKTEST_DIR))
 
 from lib.schwab_options import fetch_chain_with_greeks  # noqa: E402
+from lib.opex_calendar import third_friday  # noqa: E402
 from structures import (  # noqa: E402
     open_zebra, open_inverted_fly, open_bull_put, open_bear_call,
 )
@@ -280,18 +281,171 @@ def build_construction_block(
                 "error": f"render error for {symbol} {structure}: {e}"}
 
 
+# ─── ZEBRA-protected variant (multi-expiration) ───────────────────────
+
+def _prior_monthly_opex(zebra_expiry: str) -> str:
+    """Calendar-month-back from ZEBRA expiry, snap to that month's third Friday.
+    Used as the hedge-put expiration for zebra_protected."""
+    from datetime import datetime
+    z = datetime.strptime(zebra_expiry, "%Y-%m-%d").date()
+    prev_y = z.year if z.month > 1 else z.year - 1
+    prev_m = z.month - 1 if z.month > 1 else 12
+    return third_friday(prev_y, prev_m).isoformat()
+
+
+def _pick_put_at_strike(chain, target_strike: float):
+    """Pick the put row with strike closest to target. Requires valid pBidPx/pAskPx."""
+    sub = chain.dropna(subset=["pBidPx", "pAskPx"])
+    sub = sub[sub["pBidPx"] > 0]
+    if sub.empty:
+        return None
+    idx = (sub["strike"] - target_strike).abs().idxmin()
+    row = sub.loc[idx]
+    return row if abs(row["strike"] - target_strike) <= 1.0 else None
+
+
+def build_zebra_protected_block(symbol: str, zebra_expiry: str) -> dict:
+    """ZEBRA + ATM long put at the prior monthly OpEx — downside hedge.
+
+    The protective put expires ~30 days before the ZEBRA, capping downside
+    during the early life of the trade. After the put expires (or is closed
+    at T-10 per the framework's exit rule for residual value), the position
+    reverts to a base ZEBRA for its final ~4 weeks.
+
+    Strike = short-call strike (ATM at entry, matches the user's TOS hedge
+    convention). Returns same {ok, text, html, error} shape as the base
+    construction blocks.
+    """
+    # 1. Build base ZEBRA on the JUL chain
+    zebra_chain, zebra_spot = fetch_chain_with_greeks(symbol, zebra_expiry)
+    if zebra_chain is None or zebra_chain.empty:
+        return {"ok": False, "text": "", "html": "",
+                "error": f"empty ZEBRA chain for {symbol} @ {zebra_expiry}"}
+    zebra_pos = open_zebra(zebra_chain, pd.Timestamp.today(), pd.Timestamp(zebra_expiry))
+    if zebra_pos is None:
+        return {"ok": False, "text": "", "html": "",
+                "error": f"ZEBRA construction failed for {symbol}"}
+
+    # 2. Hedge-put expiration = prior monthly OpEx
+    hedge_expiry = _prior_monthly_opex(zebra_expiry)
+
+    # 3. Fetch hedge chain + pick ATM put at short-call strike
+    hedge_chain, _ = fetch_chain_with_greeks(symbol, hedge_expiry)
+    if hedge_chain is None or hedge_chain.empty:
+        return {"ok": False, "text": "", "html": "",
+                "error": f"empty hedge chain for {symbol} @ {hedge_expiry}"}
+
+    short_call_leg = zebra_pos.legs[2]
+    put_row = _pick_put_at_strike(hedge_chain, short_call_leg.strike)
+    if put_row is None:
+        return {"ok": False, "text": "", "html": "",
+                "error": f"no qualifying ATM put at ${short_call_leg.strike:.0f} on {hedge_expiry}"}
+
+    put_strike = float(put_row["strike"])
+    put_mid = float((put_row["pBidPx"] + put_row["pAskPx"]) / 2.0)
+    put_delta_call_convention = float(put_row.get("delta", float("nan")))  # call delta at strike
+    # Convert to put delta (standard trader convention: negative)
+    put_delta = put_delta_call_convention - 1.0 if not pd.isna(put_delta_call_convention) else float("nan")
+
+    # 4. Combined metrics
+    long_leg = zebra_pos.legs[0]
+    zebra_debit = zebra_pos.notes["debit"]
+    total_debit = zebra_debit + put_mid
+    zebra_net_delta = zebra_pos.notes["entry_delta"]
+    combined_net_delta = zebra_net_delta + put_delta
+
+    # 5. Render
+    rows_text = [
+        ("Long  call  ITM",  "+2", long_leg.strike, _display_delta(long_leg), long_leg.price, zebra_expiry),
+        ("Short call  ATM",  "-1", short_call_leg.strike, _display_delta(short_call_leg), short_call_leg.price, zebra_expiry),
+        ("Long  put   ATM",  "+1", put_strike, put_delta, put_mid, hedge_expiry),
+    ]
+    text_lines = [
+        f"  ZEBRA-protected — {symbol} (spot ${zebra_spot:.2f})",
+        f"    ZEBRA expiration:   {zebra_expiry}  (75-DTE)",
+        f"    Hedge expiration:   {hedge_expiry}  (prior monthly OpEx)",
+        "",
+        f"    {'LEG':<18} {'QTY':>4}  {'STRIKE':>7}  {'DELTA':>6}   {'PRICE':>6}   EXP",
+    ]
+    for leg, qty, strike, delta, price, exp in rows_text:
+        text_lines.append(
+            f"    {leg:<18} {qty:>4}  ${strike:>6.2f}  {delta:>+6.2f}   ${price:>5.2f}   {exp}"
+        )
+    text_lines += [
+        "",
+        f"    Total debit                  ${total_debit:.2f}  (ZEBRA ${zebra_debit:.2f} + put ${put_mid:.2f})",
+        f"    Capital outlay / contract    ${total_debit*100:.0f}",
+        f"    Initial net delta            {combined_net_delta:+.2f}  (≈ half-stock during hedge window)",
+        f"    Net delta after hedge expiry {zebra_net_delta:+.2f}  (full ZEBRA — put expired or closed)",
+        f"    ZEBRA structural max loss    ${zebra_debit*100:.0f} — only if spot < ${long_leg.strike:.2f} at expiry",
+        f"    Put hedge protection          intrinsic value below ${put_strike:.2f} on {hedge_expiry}",
+        "",
+        f"    Tactical: close protective put at T-10 from {hedge_expiry} for residual time-value.",
+        f"    Sizing: same 5–10% of book equity; total outlay ${total_debit*100:.0f} ≈ {(total_debit/zebra_debit-1)*100:.0f}% premium over base ZEBRA.",
+    ]
+
+    # HTML
+    legs_html = "".join(
+        f"<tr><td>{leg}</td><td align=center>{qty}</td>"
+        f"<td align=right>${strike:.2f}</td>"
+        f"<td align=right>{delta:+.2f}</td>"
+        f"<td align=right>${price:.2f}</td>"
+        f"<td align=right style='color:#666;font-size:11px'>{exp}</td></tr>"
+        for (leg, qty, strike, delta, price, exp) in rows_text
+    )
+    summary_html = "".join(
+        f"<tr><td>{lab}</td><td>{val}</td></tr>" for lab, val in [
+            ("Total debit", f"${total_debit:.2f}  (ZEBRA ${zebra_debit:.2f} + put ${put_mid:.2f})"),
+            ("Capital outlay / contract", f"${total_debit*100:.0f}"),
+            ("Initial net delta", f"{combined_net_delta:+.2f} (half-stock during hedge)"),
+            ("Net delta after hedge expiry", f"{zebra_net_delta:+.2f} (full ZEBRA)"),
+            ("ZEBRA structural max loss", f"${zebra_debit*100:.0f} if spot < ${long_leg.strike:.2f} at JUL expiry"),
+            ("Tactical exit", f"close protective put at T-10 from {hedge_expiry}"),
+        ]
+    )
+    html = f"""
+<div style="font-family:Menlo,Consolas,monospace;border:1px solid #b58900;
+            border-left:4px solid #b58900;padding:10px;margin:8px 0;background:#fffaf0">
+  <div style="font-weight:bold;margin-bottom:4px">ZEBRA-protected — {symbol}</div>
+  <div style="color:#555;margin-bottom:6px">
+    spot ${zebra_spot:.2f} · ZEBRA expiry {zebra_expiry} · hedge expiry {hedge_expiry}
+  </div>
+  <table style="border-collapse:collapse;font-size:13px;margin-bottom:6px">
+    <thead><tr style="background:#eee">
+      <th align=left style="padding:2px 8px">LEG</th>
+      <th style="padding:2px 8px">QTY</th>
+      <th style="padding:2px 8px">STRIKE</th>
+      <th style="padding:2px 8px">DELTA</th>
+      <th style="padding:2px 8px">PRICE</th>
+      <th style="padding:2px 8px">EXP</th>
+    </tr></thead>
+    <tbody>{legs_html}</tbody>
+  </table>
+  <table style="border-collapse:collapse;font-size:13px"><tbody>{summary_html}</tbody></table>
+  <div style="font-size:12px;color:#666;margin-top:6px">
+    Hedge premium adds ~{(total_debit/zebra_debit-1)*100:.0f}% to outlay; protects through {hedge_expiry}.
+  </div>
+</div>
+"""
+    return {"ok": True, "text": "\n".join(text_lines), "html": html, "error": None}
+
+
 # ─── CLI for ad-hoc preview ───────────────────────────────────────────
 
 if __name__ == "__main__":
     import argparse
     ap = argparse.ArgumentParser(description="Preview a construction block.")
     ap.add_argument("symbol")
-    ap.add_argument("structure", choices=list(STRUCTURE_TO_OPENER.keys()))
+    ap.add_argument("structure",
+                    choices=list(STRUCTURE_TO_OPENER.keys()) + ["zebra_protected"])
     ap.add_argument("expiry", help="YYYY-MM-DD")
     ap.add_argument("--html", action="store_true", help="emit HTML instead of text")
     args = ap.parse_args()
 
-    result = build_construction_block(args.symbol, args.structure, args.expiry)
+    if args.structure == "zebra_protected":
+        result = build_zebra_protected_block(args.symbol, args.expiry)
+    else:
+        result = build_construction_block(args.symbol, args.structure, args.expiry)
     if not result["ok"]:
         print(f"ERROR: {result['error']}")
         sys.exit(1)
