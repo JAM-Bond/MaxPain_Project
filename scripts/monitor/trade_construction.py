@@ -33,7 +33,7 @@ sys.path.insert(0, str(BACKTEST_DIR))
 
 from lib.schwab_options import fetch_chain_with_greeks  # noqa: E402
 from lib.opex_calendar import third_friday  # noqa: E402
-from scripts.monitor.moneyness_lookup import recommended_short_delta  # noqa: E402
+from scripts.monitor.moneyness_lookup import recommended_short_delta, recommended_if_wing  # noqa: E402
 from structures import (  # noqa: E402
     open_zebra, open_inverted_fly, open_bull_put, open_bear_call,
 )
@@ -255,6 +255,23 @@ def _moneyness_annotation(rec) -> tuple[str, str]:
     return text, html
 
 
+def _if_wing_annotation(rec) -> tuple[str, str]:
+    """Return (text_line, html_line) describing the per-ticker IF wing pick."""
+    pct_label = f"{rec.wing_pct*100:.0f}%"
+    if rec.is_default:
+        text = f"    Wing width: {rec.label} ({pct_label} of spot, default — no walk-forward advantage)"
+        html = (f"<div style='font-size:12px;color:#888;margin-top:4px'>"
+                f"Wing width: <b>{rec.label}</b> ({pct_label} of spot, default — no walk-forward advantage)</div>")
+        return text, html
+    p_str = f"train p={rec.train_p:.4f} (n={rec.train_n}), val p={rec.val_p:.4f} (n={rec.val_n})"
+    text = (f"    Wing width: {rec.label} ({pct_label} of spot — per-ticker walk-forward: "
+            f"{rec.evidence_pair} → {rec.label} wins; {p_str})")
+    html = (f"<div style='font-size:12px;color:#1a6b1a;margin-top:4px'>"
+            f"Wing width: <b>{rec.label}</b> ({pct_label} of spot — walk-forward validated: "
+            f"<i>{rec.evidence_pair}</i> → {rec.label} wins; {p_str})</div>")
+    return text, html
+
+
 def build_construction_block(
     symbol: str, structure: str, expiry: str,
 ) -> dict:
@@ -284,11 +301,15 @@ def build_construction_block(
                 "error": f"empty Schwab chain for {symbol} @ {expiry}"}
 
     # Per-ticker moneyness pick for vertical structures (bull_put / bear_call).
-    # ZEBRA + IF use their own selection logic, not VERTICAL_SHORT_DELTA.
+    # ZEBRA uses its own selection logic. IF uses BFLY_WING_PCT_SPOT below.
     rec = None
+    if_wing_rec = None
     if structure.startswith("bull_put") or structure.startswith("bear_call"):
         rec = recommended_short_delta(symbol, structure, exit_rule="mgd50")
         _bt_config.VERTICAL_SHORT_DELTA = rec.short_delta
+    elif structure.startswith("inverted_fly"):
+        if_wing_rec = recommended_if_wing(symbol)
+        _bt_config.BFLY_WING_PCT_SPOT = if_wing_rec.wing_pct
 
     try:
         pos = opener(chain, pd.Timestamp.today(), pd.Timestamp(expiry))
@@ -307,7 +328,13 @@ def build_construction_block(
         if rec is not None:
             ann_text, ann_html = _moneyness_annotation(rec)
             text = text + "\n" + ann_text
-            # Inject the HTML annotation just before the closing div of the card
+            html = html.replace(
+                "<div style=\"font-size:12px;color:#666;margin-top:6px\">Sizing:",
+                ann_html + "\n  <div style=\"font-size:12px;color:#666;margin-top:6px\">Sizing:",
+            )
+        if if_wing_rec is not None:
+            ann_text, ann_html = _if_wing_annotation(if_wing_rec)
+            text = text + "\n" + ann_text
             html = html.replace(
                 "<div style=\"font-size:12px;color:#666;margin-top:6px\">Sizing:",
                 ann_html + "\n  <div style=\"font-size:12px;color:#666;margin-top:6px\">Sizing:",

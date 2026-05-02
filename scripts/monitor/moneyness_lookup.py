@@ -19,12 +19,24 @@ ROOT = Path.home() / "MaxPain_Project"
 
 BULL_PUT_REC = ROOT / "data/profile/bull_put_moneyness_recommendation.parquet"
 BEAR_CALL_REC = ROOT / "data/profile/bear_call_moneyness_recommendation.parquet"
+IF_WING_REC = ROOT / "data/profile/inverted_fly_wing_recommendation.parquet"
 
 # Maps from "moneyness label" → C.VERTICAL_SHORT_DELTA value
 MONEYNESS_TO_DELTA = {"OTM": 0.30, "ATM": 0.50, "ITM": 0.70}
 
+# Maps from IF wing variant label → C.BFLY_WING_PCT_SPOT value
+IF_WING_PCT = {
+    "narrow_2pct": 0.02,
+    "medium_5pct": 0.05,
+    "wide_10pct": 0.10,
+    "vwide_15pct": 0.15,
+}
+
 # Default fallback (current TRADING_PLAN spec)
 DEFAULT_LABEL = "OTM"
+# Default IF wing — universe-wide best at slip=0.50 managed; safe choice
+# for tickers without per-ticker walk-forward evidence.
+DEFAULT_IF_WING = "medium_5pct"
 
 
 class Recommendation(NamedTuple):
@@ -46,6 +58,7 @@ def _load(path: Path) -> pd.DataFrame:
 
 _BP_LOOKUP = _load(BULL_PUT_REC)
 _BC_LOOKUP = _load(BEAR_CALL_REC)
+_IF_LOOKUP = _load(IF_WING_REC)
 
 
 def recommended_short_delta(
@@ -80,6 +93,41 @@ def recommended_short_delta(
     return Recommendation(
         label=label,
         short_delta=MONEYNESS_TO_DELTA[label],
+        is_default=False,
+        evidence_pair=r["evidence_pair"],
+        train_p=float(r["train_p"]),
+        val_p=float(r["val_p"]),
+        train_n=int(r["train_n"]),
+        val_n=int(r["val_n"]),
+    )
+
+
+class WingRecommendation(NamedTuple):
+    label: str          # narrow_2pct / medium_5pct / wide_10pct / vwide_15pct
+    wing_pct: float     # 0.02 / 0.05 / 0.10 / 0.15 — value for C.BFLY_WING_PCT_SPOT
+    is_default: bool
+    evidence_pair: str | None
+    train_p: float | None
+    val_p: float | None
+    train_n: int | None
+    val_n: int | None
+
+
+def recommended_if_wing(ticker: str) -> WingRecommendation:
+    """For an inverted-fly ticker, return the walk-forward-validated wing
+    variant, or the default fallback if none."""
+    if _IF_LOOKUP.empty:
+        return WingRecommendation(DEFAULT_IF_WING, IF_WING_PCT[DEFAULT_IF_WING],
+                                   True, None, None, None, None, None)
+    match = _IF_LOOKUP[_IF_LOOKUP["ticker"] == ticker]
+    if match.empty:
+        return WingRecommendation(DEFAULT_IF_WING, IF_WING_PCT[DEFAULT_IF_WING],
+                                   True, None, None, None, None, None)
+    r = match.iloc[0]
+    label = r["recommended_variant"]
+    return WingRecommendation(
+        label=label,
+        wing_pct=IF_WING_PCT[label],
         is_default=False,
         evidence_pair=r["evidence_pair"],
         train_p=float(r["train_p"]),
