@@ -8,7 +8,7 @@
 \f0\b\fs36 \cf0 MaxPain Project \'97 Formal Trading Plan\
 \pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\qc\pardirnatural\partightenfactor0
 
-\f1\b0\fs24 \cf0 Version 2.1 \'b7 2026-04-30\
+\f1\b0\fs24 \cf0 Version 2.2 \'b7 2026-05-02\
 \pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
 \cf0 \
 
@@ -251,6 +251,12 @@ Rolling the paper-test forward without rewriting the plan is a recognized failur
 \'95  Tail: worst cohort cycle roughly -$6 per contract held to expiry; rolling widens the 1st-percentile drawdown to approximately -$2.50 while improving the mean\
 \'95  Expect long stretches of small consistent winners punctuated by occasional larger losers. Size for the tail, not the mean.\
 \
+\b Per-ticker moneyness (VALIDATED 2026-05-02)\b0\
+\
+The 30-delta short put is a universe-wide default, but per-ticker walk-forward testing of three moneyness specs (OTM 0.30\uc0\u916 , ATM 0.50\u916 , ITM 0.70\u916 ) on the 162-ticker ORATS universe (45-DTE, slip=0.50, managed-50%, train \u8804 2022, val 2023+) produced 36 names where a non-default short delta is statistically validated in BOTH train and val windows (paired-direction p<0.05 both halves). 28 of those promote to ATM (\u916 0.50); 8 promote to ITM (\u916 0.70). The remaining 126 names default to OTM. Universe-level paired Wilcoxon under Bonferroni: ATM > OTM (median diff +0.225, p<0.0001), ITM > ATM (+0.258, p<0.0001), ITM > OTM (+0.397, p=0.002). Cluster-2 ungated/gated cells: ITM strongest (+$0.115/cycle gated, ATM +$0.104, OTM +$0.021).\
+\
+The lookup is operationally enforced at trade-construction time: scripts/monitor/moneyness_lookup.py recommended_short_delta(ticker, "bull_put", exit_rule="mgd50") reads data/profile/bull_put_moneyness_recommendation.parquet and overrides scripts/backtest/config.py:VERTICAL_SHORT_DELTA before each construction-block render. Daily-alert rows annotate the choice inline with the train/val p-values and sample sizes that earned the promotion. Default short delta when no walk-forward evidence: 0.30 (OTM). Pre-reg: docs/BULL_PUT_MONEYNESS_PREREG.md. Detail memory: project_per_ticker_moneyness_studies.md.\
+\
 \b Pending investigations (not part of validated plan)\b0\
 \
 \'95  \b RSI-14 bullish divergence as entry confirmation.\b0  Tested 2026-04-24: SPY at 20-day low with RSI-14 NOT at 20-day low precedes forward 25-day return of +4.71% vs +1.24% baseline (~4x lift, N=109). Asymmetric finding \'97 bullish divergence works as a BUY signal from oversold conditions; bearish divergence does NOT work as a sell signal. Candidate entry confirmation for bull_put on pullbacks; not yet promoted because the lift is documented on forward SPY return, not on bull_put cycle P&L directly. Needs a dedicated cycle-level test before becoming a validated entry gate.\
@@ -321,6 +327,14 @@ Rolling the paper-test forward without rewriting the plan is a recognized failur
 \'95  \b H1 signal filter: COMPLETED.\b0  Positive finding \'97 "SPY < 200dma AND SPY 252-day IV rank > 0.5" lifts mean to +$0.092/cycle, 40% win (N=102). Term inversion alone is DIS-informative. Filter is the primary entry gate above.\
 \'95  \b H3 rolling: COMPLETED.\b0  Falsified \'97 rolling compounds losses. Do not roll bear_call. Documented above.\
 \
+\b Per-ticker moneyness (VALIDATED 2026-05-02)\b0\
+\
+Same walk-forward methodology as the bull_put per-ticker moneyness study, applied to bear_call across the 162-ticker ORATS universe (OTM 0.30\uc0\u916 , ATM 0.50\u916 , ITM 0.70\u916 ; train \u8804 2022, val 2023+, both p<0.05 same direction). Universe-level pattern is identical to bull_put \'97 ATM > OTM, ITM > ATM, both significant; ITM vs OTM not significant. \b All cells negative-mean\b0  because 2013-2026 is bull-dominated; the universe-level bear_call edge is regime-contingent on the validated H1 gate, not on moneyness selection.\
+\
+27 of 162 tickers earn non-default per-ticker recommendations: 20 promote to ATM, 6 to ITM, and one ticker is the only name where the default OTM spec is statistically validated in both train and val (treat as \i confirmed-OTM\i0 , not just defaulted). The remaining 135 names default to OTM. Promotions take effect only after the H1 gate (SPY < 200dma + IVR > 0.5) fires \'97 the moneyness recommendation is a refinement of the entry strike, not an override of the regime gate.\
+\
+The lookup is operationally enforced at trade-construction time: scripts/monitor/moneyness_lookup.py recommended_short_delta(ticker, "bear_call", exit_rule="mgd50") reads data/profile/bear_call_moneyness_recommendation.parquet and overrides scripts/backtest/config.py:VERTICAL_SHORT_DELTA before each construction-block render. Default short delta when no walk-forward evidence: 0.30 (OTM). Detail memory: project_per_ticker_moneyness_studies.md.\
+\
 \b Still pending (not part of the validated plan)\b0\
 \
 \'95  \b Regime detector (Phase 2i):\b0  broader macro-indicator gate (VIX level, breadth, credit spreads, yield curve) that could refine bear_call deployment beyond the H1 filter. Not yet tested. Low priority given H1 is already validated.\
@@ -349,6 +363,18 @@ Unlike the three short-premium structures above, inverted fly is a long-volatili
 \'95  \b Wing width: 10% of spot (VALIDATED).\b0  Tested at 3%, 5%, 10%, 15% of spot. 10% is the sweet spot \'97 universe-wide mean +$0.146/cycle; cluster 2 at 10% wings has genuine year-round edge (+$0.167 non-crash, +$1.30 in crashes). 15% wings match 10% on mean but go slightly NEGATIVE in Volmageddon 2018. Narrower than 5% degenerates to an ATM-straddle-with-decoration.\
 \'95  \b Sizing.\b0  By dollar debit per contract (entry cost = max loss). SPX inverted fly at 10% wings is typically $1,500\'96$3,000 debit per contract; AMD or CAR is $400\'96$900 per contract. Naive per-contract sizing overweights index names by 5\'96 10\'d7. SPX alone carries 77% of pair book dollar P&L; sizing must account for this.\
 \'95  \b Execution.\b0  Open all four legs simultaneously on a combo ticket. Legging in during inverted term structure risks paying more on later legs as IV continues rising.\
+\
+\b Per-ticker wing width (VALIDATED 2026-05-02)\b0\
+\
+The 10%-of-spot wing width above is the universe-level finding from the wide-wings study. Per-ticker walk-forward testing of four wing specs (narrow_2pct, medium_5pct, wide_10pct, vwide_15pct) on the 162-ticker ORATS universe (45-DTE, 50%-only exit, train \uc0\u8804 2022, val 2023+, both halves p<0.05 same direction) refines this:\
+\
+\'95  \b 7 tickers \uc0\u8594  wide_10pct\b0  (broad indices and dividend stalwarts \'97 names whose realized-move distribution rewards the wider short strikes).\
+\'95  \b 7 tickers \uc0\u8594  medium_5pct\b0  (Mag-7-class single names and high-vol cyclicals \'97 5% wings capture the typical move while keeping debit small enough that the structure pays back at moderate magnitude).\
+\'95  \b 2 tickers \uc0\u8594  narrow_2pct\b0  (rare; specific underliers where 2% captures the typical 45-day move).\
+\'95  \b 0 tickers \uc0\u8594  vwide_15pct.\b0  15% wings never survive walk-forward; 10% is the practical maximum.\
+\'95  \b 146 tickers default to medium_5pct\b0  in the absence of walk-forward evidence. This is the new fallback (the prior scripts/backtest/config.py:BFLY_WING_PCT_SPOT_V2 = 0.0025 default was much too narrow \'97 a degenerate ATM-straddle-with-decoration). Universe-level managed mean: wide_10pct +$0.12, medium_5pct positive, narrow_2pct \'96$0.12. Under the IF gate (term inverted, ~20% of cycles), wide_10pct lifts to +$0.49/cycle.\
+\
+The lookup is operationally enforced at trade-construction time: scripts/monitor/moneyness_lookup.py recommended_if_wing(ticker) reads data/profile/inverted_fly_wing_recommendation.parquet and overrides scripts/backtest/config.py:BFLY_WING_PCT_SPOT before each construction-block render. The text "10% of spot" elsewhere in this section remains the canonical universe-level wing for narrative purposes; the per-ticker lookup is the deployable spec. Detail memory: project_per_ticker_moneyness_studies.md.\
 \
 \b Symbols that respond well (TESTED)\b0\
 \
@@ -506,6 +532,12 @@ Cyclicals and commodity-flow names where the underlying did not sustain a direct
 \'95  Worst-case loss: capped at debit per contract. Concentrated in high-priced names \'97 size by capital outlay, not contract count.\
 \'95  Best train/val behavior: NVDA, QQQ, SPY, GE, GLD all show stronger validation than train, consistent with 2023-2026 bullish regime amplifying the gamma capture mechanism.\
 \'95  Slip sensitivity: minimal. slip=0.25 vs slip=0.50 differs by <$0.05/share at cohort means \'97 ZEBRA's edge is dominated by the long-stock-equivalent payoff at expiry, not by the bid-ask cost of entry/exit.\
+\
+\b Tier 2 universe expansion (2026-05-01)\b0\
+\
+The Tier 2 cohort grew by one name on 2026-05-01 via a pre-registered universe-expansion test. 148 candidates were screened from the broader ORATS archive against the same four pre-reg gates that established the original Tier 1 / Tier 2 (extrinsic-rule fire rate \uc0\u8805 80%, flat-day MTM positive, median upside capture > 1.0, capital efficiency \u8804 0.30). Seven survivors were curated; one was promoted to Tier 2 after walk-forward validation. Pre-reg sealed in docs/ZEBRA_UNIVERSE_EXPANSION_PREREG.md. Cohort membership is in scripts/qualifier/gate_config.py:COHORT_ZEBRA_TIER2 \'97 the plan does not enumerate names because cohorts rotate per the v2.0 source-of-truth architecture.\
+\
+The methodology generalizes: future Tier 2 (or Tier 1) additions follow the same pre-reg + walk-forward + capital-efficiency gate pattern. A name does not enter the cohort because it screens well; it enters because the pre-registered hypothesis test passes on a held-out window. This is the discipline that keeps the cohort honest as the universe rotates.\
 \
 \b Pending investigations\b0\
 \
@@ -1000,6 +1032,25 @@ scripts/monitor/daily_alert.py runs at 4:45 PM ET each weekday and emits a focus
 \
 When all sections are empty, the alert prints "All quiet \'97 no alerts."\
 \
+\b Trade construction (deployed 2026-05-01, expanded 2026-05-02)\b0\
+\
+scripts/monitor/trade_construction.py builds executable trade tickets for actionable rows in the daily alert, covering the four deployable structures (zebra, zebra_protected, inverted_fly, bull_put, bear_call). For every actionable row at days_until\uc0\u8804 1 the alert appends a construction block showing strikes, deltas, mids, and credit/debit, ready for the user to enter on the broker.\
+\
+The construction module routes by structure name to the corresponding open_* helper in scripts/backtest/structures.py \'97 the same leg-selection logic that powers the backtest. structures.py works on both ORATS by_ticker rows (backtest) and live Schwab chains (alert) because both sources expose the same column convention (strike, delta, cMidIv, pMidIv, cBidPx, cAskPx, stkPx). One source of truth for leg selection: backtest validates a method, the live system reuses the exact same code path to construct the trade. Live chain pull: lib/schwab_options.py:fetch_chain_with_greeks() with \'b13-day expiration tolerance for Schwab's Thursday vs Friday OpEx variance.\
+\
+Per-ticker recommendations are applied automatically before each open_* call: bull_put / bear_call rows override scripts/backtest/config.py:VERTICAL_SHORT_DELTA via moneyness_lookup.recommended_short_delta(); inverted_fly rows override BFLY_WING_PCT_SPOT via recommended_if_wing(). Each construction block annotates the per-ticker pick (or default) with the train/val p-values that earned the promotion. ZEBRA and ZEBRA-protected use their own selection logic (the practitioner search at \uc0\u8916 0.55-0.90) and are not affected by the moneyness lookup.\
+\
+The alert renders construction blocks in both plain-text and HTML formats. SMTP delivery via lib/email_alert.py; emails fire only when actionable rows or events are present (skip when truly quiet). Construction selection prices off the chain mid, matching the backtest's slip=0.50 assumption.\
+\
+\b Pricing mode (assumption to flag at execution)\b0\
+\
+Construction-time selection prices off the chain mid for delta-target leg picks, matching the backtest's slip=0.50 assumption. Live broker execution will see the actual bid/ask spread, not the mid \'97 a leg picked at mid may fill worse if the spread is wide on entry day. The alert emits a target credit/debit at mid; the user evaluates the live spread at entry and accepts only if the realized fill is within the slip envelope the backtest validated. Per feedback_backtest_slip_assumption_validation.md, slip assumptions are the binding test: a structure validated at slip=0.50 must also fill at slip=0.50 in live execution before live capital is committed. The covered-call demotion (v2.1) is the cautionary precedent.\
+\
+\b Daily ORATS forward-collection pipeline (deployed 2026-05-02)\b0\
+\
+scripts/orats/* runs at 7 PM ET each weekday and refreshes the by_ticker ORATS parquets used by the backtest engine and by every walk-forward refresh. The pipeline is idempotent (re-running a date does not corrupt prior data) and supports backfill ranges. An 11-day backfill (2026-04-22 to 2026-05-01) was executed as the bring-up validation. SFTP credentials are in scripts/orats/config.py (gitignored per feedback_orats_config_gitignore.md). Cleanup runs after each tier per project_orats_cleanup_plan.md.\
+\
+The recommendation parquets (bull_put / bear_call moneyness, IF wing width, ZEBRA cohort) are not regenerated daily \'97 they are refreshed quarterly or on cohort change by re-running the corresponding *_walkforward.py and *_followup.py scripts in scripts/backtest/. The daily ORATS refresh keeps the by_ticker parquets current so those refreshes always run on up-to-date history when triggered.\
 
 \f0\b\fs28 What Doesn\'92t Work (Caveats for bull_put and bear_call)\
 
@@ -1402,4 +1453,17 @@ Same-day reversal of the v1.9 promotion. The fastest research-to-falsification r
 \'95  \b Methodology lesson recorded.\b0  feedback_backtest_slip_assumption_validation.md establishes the rule: any backtest on illiquid option chains requires live-execution validation before live-capital deployment, AND the live test is binding even when the backtest passed walk-forward. Slip assumptions tighter than the actual best-bid-to-mid distance silently overstate edge. Apply going forward to every new structure family; cite when re-running existing backtests.\
 \'95  \b Daily alert EX-DIV ASSIGNMENT RISK section retained.\b0  Currently dormant (no covered_call positions exist); harmless when the cohort is empty; ready if the strategy is rehabilitated. Removing it would require re-implementation if the strategy revives.\
 \'95  Plan version bumped to 2.1.\
+\
+\b v2.2 \'97 2026-05-02 Per-ticker moneyness + IF wing width validated; trade construction infrastructure documented; daily ORATS pipeline\b0\
+\
+Saturday session adding three walk-forward studies, the live trade-construction pipeline, and a daily ORATS forward-collection cron. No structures promoted or demoted; mechanics for three existing structures are now per-ticker rather than universe-default. ZEBRA Tier 2 cohort grew by one name via the universe-expansion methodology.\
+\
+\'95  \b Bull_put per-ticker moneyness VALIDATED.\b0  Walk-forward test of three moneyness specs (OTM 0.30\uc0\u916 , ATM 0.50\u916 , ITM 0.70\u916 ) on 162-ticker ORATS universe (45-DTE, slip=0.50, managed-50%, train \u8804 2022, val 2023+, both halves p<0.05 same direction) produced 36 names with non-default per-ticker recommendations: 28 \u8594  ATM, 8 \u8594  ITM, remainder default to OTM. Universe-level paired Wilcoxon under Bonferroni: ATM > OTM (median diff +0.225, p<0.0001), ITM > ATM (+0.258, p<0.0001), ITM > OTM (+0.397, p=0.002). Pre-reg sealed 2026-05-02 in docs/BULL_PUT_MONEYNESS_PREREG.md. Recommendation parquet at data/profile/bull_put_moneyness_recommendation.parquet. New "Per-ticker moneyness" block added to Bull Put section. Detail memory: project_per_ticker_moneyness_studies.md.\
+\'95  \b Bear_call per-ticker moneyness VALIDATED.\b0  Same walk-forward methodology, same universe; 27 names earn non-default recommendations (20 \uc0\u8594  ATM, 6 \u8594  ITM, 1 \u8594  OTM-confirmed). All universe cells are negative-mean because 2013-2026 is bull-dominated; the H1 gate (SPY < 200dma + IVR > 0.5) remains the binding regime gate. Per-ticker moneyness refines strike selection inside the gate, does not override the gate. Recommendation parquet at data/profile/bear_call_moneyness_recommendation.parquet. New "Per-ticker moneyness" block added to Bear Call section. Detail memory: project_per_ticker_moneyness_studies.md.\
+\'95  \b Inverted_fly per-ticker wing width VALIDATED.\b0  Walk-forward test of four wing specs (narrow_2pct, medium_5pct, wide_10pct, vwide_15pct) on 162-ticker universe (45-DTE, 50%-only exit, walk-forward both p<0.05 same direction) produced 16 names with non-default recommendations: 7 \uc0\u8594  wide_10pct (broad indices and dividend stalwarts), 7 \u8594  medium_5pct (Mag-7 / cyclicals), 2 \u8594  narrow_2pct (rare). 0 names survive at vwide_15pct \'97 15% wings never validate. Default wing for the remaining 146 names changed from 0.25%-of-spot (the prior config.py V2 default, much too narrow) to medium_5pct. The "10% of spot" canonical wing in the Inverted Fly section is retained for narrative continuity; per-ticker lookup is the deployable spec. Recommendation parquet at data/profile/inverted_fly_wing_recommendation.parquet. New "Per-ticker wing width" block added to Inverted Fly section. Detail memory: project_per_ticker_moneyness_studies.md.\
+\'95  \b ZEBRA Tier 2 universe expansion completed (2026-05-01).\b0  Pre-registered 148-candidate screen of the broader ORATS archive against the original four pre-reg gates (extrinsic-rule fire rate, flat-day MTM, median upside capture, capital efficiency); 7 names curated; 1 promoted to Tier 2 after walk-forward validation. Pre-reg sealed in docs/ZEBRA_UNIVERSE_EXPANSION_PREREG.md. Cohort membership updated in scripts/qualifier/gate_config.py:COHORT_ZEBRA_TIER2; plan does not enumerate names per the v2.0 source-of-truth architecture. New "Tier 2 universe expansion" block added to ZEBRA section.\
+\'95  \b Trade construction infrastructure deployed.\b0  scripts/monitor/trade_construction.py builds executable tickets for actionable rows in the daily alert across all four deployable structures (zebra, zebra_protected, inverted_fly, bull_put, bear_call). Routes by structure name to the corresponding open_* helper in scripts/backtest/structures.py; same leg-selection logic powers backtest and live. Live chain pull via lib/schwab_options.py:fetch_chain_with_greeks() with \'b13-day expiration tolerance for Schwab's Thursday vs Friday OpEx variance. Per-ticker moneyness / wing-width lookups override scripts/backtest/config.py constants before each open_* call; construction blocks annotate the per-ticker pick with train/val p-values inline. SMTP delivery via lib/email_alert.py; emails fire only on actionable rows or events. New "Trade construction" block added to Decision Support Infrastructure section. Detail memory: reference_daily_alert_v17.md (now v1.9).\
+\'95  \b Pricing-mode assumption documented.\b0  Construction-time selection prices off chain mid, matching the backtest's slip=0.50 assumption. Live broker execution will see actual bid/ask spread; user evaluates the realized fill against the slip envelope at entry. Per feedback_backtest_slip_assumption_validation.md, the slip assumption is binding \'97 a structure validated at slip=0.50 must fill at slip=0.50 live before live capital is committed. New "Pricing mode" block added to Decision Support Infrastructure section.\
+\'95  \b Daily ORATS forward-collection pipeline deployed.\b0  scripts/orats/* runs at 7 PM ET each weekday and refreshes the by_ticker ORATS parquets used by the backtest engine. Idempotent; supports backfill ranges. 11-day backfill (2026-04-22 to 2026-05-01) executed as bring-up validation. SFTP creds in scripts/orats/config.py (gitignored per feedback_orats_config_gitignore.md); cleanup per project_orats_cleanup_plan.md. Recommendation parquets remain quarterly-refresh artifacts; the daily ORATS refresh keeps by_ticker history current for those refreshes. New "Daily ORATS forward-collection pipeline" block added to Decision Support Infrastructure section.\
+\'95  Plan version bumped to 2.2.\
 }
