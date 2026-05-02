@@ -33,6 +33,7 @@ sys.path.insert(0, str(BACKTEST_DIR))
 
 from lib.schwab_options import fetch_chain_with_greeks  # noqa: E402
 from lib.opex_calendar import third_friday  # noqa: E402
+from scripts.monitor.moneyness_lookup import recommended_short_delta  # noqa: E402
 from structures import (  # noqa: E402
     open_zebra, open_inverted_fly, open_bull_put, open_bear_call,
 )
@@ -238,10 +239,31 @@ def _render_html(symbol: str, structure: str, expiry: str, spot: float, m: dict)
 
 # ─── Public entry point ───────────────────────────────────────────────
 
+def _moneyness_annotation(rec) -> tuple[str, str]:
+    """Return (text_line, html_line) describing the per-ticker moneyness pick."""
+    if rec.is_default:
+        text = f"    Moneyness: {rec.label} (default — no walk-forward advantage)"
+        html = (f"<div style='font-size:12px;color:#888;margin-top:4px'>"
+                f"Moneyness: <b>{rec.label}</b> (default — no walk-forward advantage)</div>")
+        return text, html
+    p_str = f"train p={rec.train_p:.4f} (n={rec.train_n}), val p={rec.val_p:.4f} (n={rec.val_n})"
+    text = (f"    Moneyness: {rec.label} (per-ticker walk-forward: {rec.evidence_pair} → "
+            f"{rec.label} wins; {p_str})")
+    html = (f"<div style='font-size:12px;color:#1a6b1a;margin-top:4px'>"
+            f"Moneyness: <b>{rec.label}</b> (walk-forward validated: "
+            f"<i>{rec.evidence_pair}</i> → {rec.label} wins; {p_str})</div>")
+    return text, html
+
+
 def build_construction_block(
     symbol: str, structure: str, expiry: str,
 ) -> dict:
     """Pull live Schwab chain, construct a position, render text + html.
+
+    For bull_put / bear_call structures, applies the per-ticker walk-forward-
+    validated moneyness recommendation (mgd50 exit, since that's what the
+    framework actually trades). Falls back to OTM 0.30 default for tickers
+    without a validated recommendation.
 
     Returns a dict:
       {ok: bool, text: str, html: str, error: str | None}
@@ -261,6 +283,13 @@ def build_construction_block(
         return {"ok": False, "text": "", "html": "",
                 "error": f"empty Schwab chain for {symbol} @ {expiry}"}
 
+    # Per-ticker moneyness pick for vertical structures (bull_put / bear_call).
+    # ZEBRA + IF use their own selection logic, not VERTICAL_SHORT_DELTA.
+    rec = None
+    if structure.startswith("bull_put") or structure.startswith("bear_call"):
+        rec = recommended_short_delta(symbol, structure, exit_rule="mgd50")
+        _bt_config.VERTICAL_SHORT_DELTA = rec.short_delta
+
     try:
         pos = opener(chain, pd.Timestamp.today(), pd.Timestamp(expiry))
     except Exception as e:
@@ -275,6 +304,14 @@ def build_construction_block(
         m = _metrics_for(pos, structure)
         text = _render_text(symbol, structure, expiry, spot, m)
         html = _render_html(symbol, structure, expiry, spot, m)
+        if rec is not None:
+            ann_text, ann_html = _moneyness_annotation(rec)
+            text = text + "\n" + ann_text
+            # Inject the HTML annotation just before the closing div of the card
+            html = html.replace(
+                "<div style=\"font-size:12px;color:#666;margin-top:6px\">Sizing:",
+                ann_html + "\n  <div style=\"font-size:12px;color:#666;margin-top:6px\">Sizing:",
+            )
         return {"ok": True, "text": text, "html": html, "error": None}
     except Exception as e:
         return {"ok": False, "text": "", "html": "",
