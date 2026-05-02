@@ -16,6 +16,7 @@ Pre-registration: docs/SIGNAL_VALIDATION_PREREG.md (sealed 2026-04-26).
 import argparse
 import sqlite3
 import sys
+from datetime import date
 from pathlib import Path
 
 DB_PATH = "/Users/josephmorris/Metal_Project/data/shared/metal_project.db"
@@ -279,7 +280,13 @@ def report_signal_state_attribution(cur, opex):
 def report_signal_flips(cur, opex=None):
     """Date-by-date table of regime_state flips. If opex is given, scope to
     the cycle window [min(entry_date), opex] for placed=1 trades on that
-    cycle. Otherwise show the full live history."""
+    cycle. Otherwise scope to the paper-test window: from
+    min(entry_date) of any placed=1 closed trade through today.
+
+    The full regime_state table goes back to 2013-07 (ORATS-backfilled
+    history); printing all of that in cumulative mode is noise. The
+    paper-test window is the meaningful scope for forward-test review.
+    """
     cycle_window = None
     if opex:
         cycle_window = cur.execute(
@@ -296,12 +303,30 @@ def report_signal_flips(cur, opex=None):
                 f"{cycle_window['first_entry']} → {opex})"
             )
         else:
-            section_header("REGIME SIGNAL FLIPS (live history, all dates)")
-            cycle_window = None  # fall back to full history
+            section_header("REGIME SIGNAL FLIPS (no cycle scope; paper-test window)")
+            cycle_window = None
     else:
-        section_header("REGIME SIGNAL FLIPS (live history, all dates)")
+        # Cumulative mode — scope to the paper-test window (min entry of any
+        # placed=1 closed trade through today) instead of the full
+        # ORATS-backfilled history.
+        first = cur.execute(
+            """
+            SELECT MIN(entry_date) AS first_entry
+            FROM spread_score_trades
+            WHERE placed = 1 AND status = 'closed'
+            """
+        ).fetchone()
+        if first and first["first_entry"]:
+            cycle_window = first
+            section_header(
+                f"REGIME SIGNAL FLIPS (paper-test window "
+                f"{first['first_entry']} → today)"
+            )
+        else:
+            section_header("REGIME SIGNAL FLIPS (no closed paper-test trades yet)")
 
     if cycle_window:
+        end_date = opex if opex else date.today().isoformat()
         rows = cur.execute(
             """
             SELECT snapshot_date, stage, h1_active, if_gate_active,
@@ -311,18 +336,10 @@ def report_signal_flips(cur, opex=None):
             WHERE snapshot_date BETWEEN ? AND ?
             ORDER BY snapshot_date
             """,
-            (cycle_window["first_entry"], opex),
+            (cycle_window["first_entry"], end_date),
         ).fetchall()
     else:
-        rows = cur.execute(
-            """
-            SELECT snapshot_date, stage, h1_active, if_gate_active,
-                   bull_put_signal_active, hard_pause_active,
-                   soft_downsize_active, below_200dma, term_inverted
-            FROM regime_state
-            ORDER BY snapshot_date
-            """
-        ).fetchall()
+        rows = []
 
     if not rows:
         print("(no regime_state rows yet)")
