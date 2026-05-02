@@ -20,10 +20,14 @@ from __future__ import annotations
 COHORT_BULL_PUT = [
     "MSFT", "TJX", "WMT", "QQQ", "CNC", "RIO", "SPY", "DAL",
     "INTC", "WFC", "XLU", "HYG",
+    # v2 expansion 2026-05-02 (Tier A + top Tier B; see UNIVERSE_EXPANSION_V2_PREREG.md)
+    "AVGO", "JPM", "GS", "GNRC", "SMH", "RCL", "FSLR", "AMAT",
 ]
 
 COHORT_BEAR_CALL = [
     "SPX", "SPY", "QQQ", "DIA", "IWM", "WMT",
+    # v2 expansion 2026-05-02 (Tier B; deploy when H1 fires)
+    "EL", "TGT", "BA",
 ]
 
 COHORT_INVERTED_FLY_PAIR = [
@@ -34,6 +38,8 @@ COHORT_INVERTED_FLY_PAIR = [
 COHORT_INVERTED_FLY_SINGLE = [
     "TSLA", "AMD", "NVDA", "CAR", "AMZN", "META", "GOOGL", "BABA",
     "SCCO", "GOLD", "CLF",
+    # v2 expansion 2026-05-02 (Tier A; standalone IF — methodology was per-ticker walk-forward without bull_put pairing)
+    "ISRG", "XLK", "PEP", "STX",
 ]
 
 COHORT_ZEBRA_TIER1 = [
