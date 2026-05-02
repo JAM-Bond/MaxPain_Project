@@ -1,17 +1,18 @@
 #!/usr/bin/env python3.11
 """
-MaxPain — Post-close price update for research_cohort_snapshots
+MaxPain — Post-close price update for live_snapshots
 ~/MaxPain_Project/scripts/pipeline/update_close_prices.py
 
-Lightweight cron job: runs at 4:15 PM ET on weekdays to update the
-current_price column in today's research_cohort_snapshots rows with
-the actual closing trade. The 9:20 AM cron captures OI/gamma/max-pain
-(which need the 8:30-9:00 AM OI refresh) but the 9:20 price is the
-prior day's close. This script fixes the lag so the 4:45 PM daily
-alert sees today's actual close.
+Lightweight cron job: runs at 4:16 PM ET on weekdays to update the
+current_price column in today's live_snapshots rows with the actual
+closing trade. The 9:20 AM cron captures OI/gamma/max-pain (which need
+the 8:30-9:00 AM OI refresh) but the 9:20 price is the prior day's
+close. This script fixes the lag so the 4:45 PM daily alert sees
+today's actual close.
 
-Cohort source: data/profile/research_cohort_v15.parquet (37 names,
-SPX excluded due to Schwab equity-only quote endpoint).
+Cohort source: union of every COHORT_* list in
+scripts/qualifier/gate_config.py (auto-cascades on cohort edits). SPX
+excluded — Schwab equity-quote endpoint doesn't handle index tickers.
 
 Schwab quotes are primary; yfinance fallback for any misses. Only
 updates rows that already exist for today — does NOT create new
@@ -32,8 +33,6 @@ import sys
 from datetime import date
 from pathlib import Path
 
-import pandas as pd
-
 sys.path.insert(0, str(Path.home() / "MaxPain_Project"))
 from lib.schwab_quotes import fetch_quotes  # noqa: E402
 
@@ -43,7 +42,6 @@ except ImportError:
     yf = None
 
 ROOT = Path.home() / "MaxPain_Project"
-COHORT_PATH = ROOT / "data/profile/research_cohort_v15.parquet"
 DB_PATH = Path.home() / "Metal_Project/data/shared/metal_project.db"
 
 # SPX excluded — Schwab equity-quote endpoint doesn't handle index tickers
@@ -70,7 +68,7 @@ def fetch_yfinance_prices(symbols: list[str]) -> dict[str, float]:
 
 
 def update_prices(prices: dict[str, float], date_str: str, dry_run: bool = False) -> int:
-    """Update current_price in research_cohort_snapshots for the given date.
+    """Update current_price in live_snapshots for the given date.
 
     Returns count of rows actually updated.
     """
@@ -78,7 +76,7 @@ def update_prices(prices: dict[str, float], date_str: str, dry_run: bool = False
     updated = 0
     for sym, price in prices.items():
         row = conn.execute(
-            "SELECT current_price FROM research_cohort_snapshots "
+            "SELECT current_price FROM live_snapshots "
             "WHERE symbol = ? AND snapshot_date = ?",
             (sym, date_str),
         ).fetchone()
@@ -90,7 +88,7 @@ def update_prices(prices: dict[str, float], date_str: str, dry_run: bool = False
             print(f"  {sym}: ${old} → ${price} (dry run)")
         else:
             conn.execute(
-                "UPDATE research_cohort_snapshots "
+                "UPDATE live_snapshots "
                 "SET current_price = ? WHERE symbol = ? AND snapshot_date = ?",
                 (price, sym, date_str),
             )
@@ -116,8 +114,14 @@ def main():
     if args.symbol:
         symbols = [s.upper() for s in args.symbol if s.upper() not in SKIP]
     else:
-        cohort = pd.read_parquet(COHORT_PATH)["ticker"].tolist()
-        symbols = [s for s in cohort if s not in SKIP]
+        from scripts.qualifier import gate_config as G
+        union: set[str] = set()
+        for attr in dir(G):
+            if attr.startswith("COHORT_"):
+                v = getattr(G, attr)
+                if isinstance(v, (list, tuple, set)):
+                    union.update(v)
+        symbols = sorted(s for s in union if s not in SKIP)
 
     if not symbols:
         print("No symbols to update.")

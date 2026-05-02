@@ -3,20 +3,22 @@
 MaxPain research cohort daily snapshot
 ~/MaxPain_Project/scripts/pipeline/research_cohort_snapshot.py
 
-Captures the same summary metrics as Metal_Project's 9:15 ET daily_snapshot,
-but for the deployable cohort union from scripts/qualifier/gate_config.py.
-Writes to a separate research_cohort_snapshots table in metal_project.db so
-the live trading book and the research cohort stay clearly distinct.
+Captures the same summary metrics that the prior Metal_Project 9:15 ET
+yfinance snapshot did, but pulled live from Schwab and scoped to the
+deployable cohort union from scripts/qualifier/gate_config.py. Writes to
+the unified `live_snapshots` table in metal_project.db (since 2026-05-02;
+formerly `research_cohort_snapshots`).
 
-Cohort source (as of 2026-05-02): the union of every COHORT_* list in
-gate_config.py. Adding a ticker to any cohort there auto-cascades here on
-the next run — no parquet edit needed. Replaces the prior frozen v1.5
-parquet (data/profile/research_cohort_v15.parquet, kept as historical
-reference) which was missing post-v1.5 promotions like KRE.
+Cohort source: union of every COHORT_* list in gate_config.py. Adding a
+ticker to any cohort there auto-cascades here on the next run — no
+parquet edit needed. The earlier frozen v1.5 parquet
+(data/profile/research_cohort_v15.parquet) is kept as historical reference
+but no longer read; it was missing post-v1.5 promotions like KRE.
 
-Reuses Metal_Project's take_snapshot() to ensure schema parity with
-daily_snapshots. SPX is excluded by default — Schwab equity-chain endpoint
-does not handle index tickers; use SPY as the proxy for index signals.
+Reuses MaxPain_Project's take_snapshot() (lib/snapshot.py — schema parity
+with the legacy daily_snapshots table). SPX is excluded by default —
+Schwab equity-chain endpoint does not handle index tickers; use SPY as
+the proxy for index signals.
 
 Run:
     python3.11 research_cohort_snapshot.py            # full cohort
@@ -46,7 +48,7 @@ DB_PATH = Path.home() / "Metal_Project/data/shared/metal_project.db"
 SKIP = {"SPX"}
 
 COLUMNS = [
-    "symbol", "snapshot_date", "cohort", "opex_date",
+    "symbol", "snapshot_date", "opex_date",
     "current_price", "max_pain", "distance_pct",
     "pin_zone_low", "pin_zone_high", "pin_zone_width",
     "pcr", "total_call_oi", "total_put_oi",
@@ -81,11 +83,11 @@ def write_snapshots(snaps: list[dict]) -> int:
     col_list = ", ".join(COLUMNS)
     rows = []
     for s in snaps:
-        s["cohort"] = "gate_config"  # union of COHORT_* in scripts/qualifier/gate_config.py
         s["dividend_flag"] = 1 if s.get("dividend_flag") else 0
+        s.setdefault("data_source", "schwab")
         rows.append([s.get(c) for c in COLUMNS])
     cur.executemany(
-        f"INSERT OR REPLACE INTO research_cohort_snapshots ({col_list}) "
+        f"INSERT OR REPLACE INTO live_snapshots ({col_list}) "
         f"VALUES ({placeholders})",
         rows,
     )
@@ -338,7 +340,7 @@ def main() -> None:
 
     if not args.regime_only:
         n = write_snapshots(snaps)
-        print(f"\n  ✓ research_cohort_snapshots updated  ({n} rows upserted)")
+        print(f"\n  ✓ live_snapshots updated  ({n} rows upserted)")
     if regime is not None:
         write_regime_state(regime)
         print(f"  ✓ regime_state updated  (stage={regime['stage']})")

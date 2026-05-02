@@ -101,7 +101,7 @@ def fetch_chain_data(symbol: str, opex: date):
 def take_snapshot(symbol: str, opex: date, today: date) -> dict | None:
     """Pull live options data for symbol and compute all summary metrics.
 
-    Returns snapshot dict (same schema as Metal_Project's daily_snapshots)
+    Returns snapshot dict (same schema as the live_snapshots table)
     or None on failure. Prints a one-line per-symbol summary to stdout.
     """
     print(f"  {symbol}...", end=" ", flush=True)

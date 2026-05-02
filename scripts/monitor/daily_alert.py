@@ -375,20 +375,18 @@ def get_recent_close(symbol: str) -> tuple[float | None, float | None, str | Non
 
 
 def get_schwab_today(conn, symbol: str) -> tuple[float | None, str | None]:
-    """Most recent intraday/EOD close from research_cohort_snapshots or
-    daily_snapshots — used when ORATS is a day stale and we have a fresher
-    Schwab capture."""
-    for tbl in ("research_cohort_snapshots", "daily_snapshots"):
-        try:
-            row = conn.execute(
-                f"SELECT current_price, snapshot_date FROM {tbl} "
-                f"WHERE symbol = ? ORDER BY snapshot_date DESC LIMIT 1",
-                (symbol,),
-            ).fetchone()
-            if row and row[0]:
-                return float(row[0]), row[1]
-        except Exception:
-            pass
+    """Most recent intraday/EOD close from live_snapshots — used when ORATS
+    is a day stale and we have a fresher Schwab capture."""
+    try:
+        row = conn.execute(
+            "SELECT current_price, snapshot_date FROM live_snapshots "
+            "WHERE symbol = ? ORDER BY snapshot_date DESC LIMIT 1",
+            (symbol,),
+        ).fetchone()
+        if row and row[0]:
+            return float(row[0]), row[1]
+    except Exception:
+        pass
     return None, None
 
 

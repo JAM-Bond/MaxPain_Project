@@ -3,8 +3,8 @@ MaxPain — Schwab quotes endpoint wrapper
 ~/MaxPain_Project/lib/schwab_quotes.py
 
 Lightweight batched-quote fetcher. Used by update_close_prices.py at
-4:15 PM ET to refresh current_price in today's research_cohort_snapshots
-rows with the actual closing trade.
+4:16 PM ET to refresh current_price in today's live_snapshots rows
+with the actual closing trade.
 
 Schwab /marketdata/v1/quotes returns one call for many symbols. After
 4:00 PM ET, lastPrice = today's closing trade. closePrice is the prior
