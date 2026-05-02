@@ -109,6 +109,8 @@ def per_ticker_walkforward(df: pd.DataFrame) -> pd.DataFrame:
             v_complete = val_wide.dropna(subset=[a, b]) if a in val_wide.columns and b in val_wide.columns else pd.DataFrame()
             t_n, v_n = len(t_complete), len(v_complete)
             t_p, v_p, t_winner, v_winner = np.nan, np.nan, None, None
+            t_mean_a, t_mean_b = np.nan, np.nan
+            v_mean_a, v_mean_b = np.nan, np.nan
             if t_n >= 5:
                 tdiff = (t_complete[a] - t_complete[b]).to_numpy()
                 try:
@@ -117,6 +119,8 @@ def per_ticker_walkforward(df: pd.DataFrame) -> pd.DataFrame:
                     t_p = np.nan
                 t_med = float(np.median(tdiff))
                 t_winner = a if t_med > 0 else b
+                t_mean_a = float(t_complete[a].mean())
+                t_mean_b = float(t_complete[b].mean())
             if v_n >= 5:
                 vdiff = (v_complete[a] - v_complete[b]).to_numpy()
                 try:
@@ -125,6 +129,8 @@ def per_ticker_walkforward(df: pd.DataFrame) -> pd.DataFrame:
                     v_p = np.nan
                 v_med = float(np.median(vdiff))
                 v_winner = a if v_med > 0 else b
+                v_mean_a = float(v_complete[a].mean())
+                v_mean_b = float(v_complete[b].mean())
             same_dir = (t_winner is not None and v_winner is not None and t_winner == v_winner)
             train_pass = (t_n >= MIN_N_TRAIN and not np.isnan(t_p) and t_p < ALPHA)
             val_pass = (v_n >= MIN_N_VAL and not np.isnan(v_p) and v_p < ALPHA)
@@ -132,7 +138,9 @@ def per_ticker_walkforward(df: pd.DataFrame) -> pd.DataFrame:
             rows.append({
                 "ticker": ticker, "pair": f"{a} vs {b}",
                 "train_n": t_n, "train_p": t_p, "train_winner": t_winner,
+                "train_mean_a": t_mean_a, "train_mean_b": t_mean_b,
                 "val_n": v_n, "val_p": v_p, "val_winner": v_winner,
+                "val_mean_a": v_mean_a, "val_mean_b": v_mean_b,
                 "promoted": promoted,
             })
     return pd.DataFrame(rows)
