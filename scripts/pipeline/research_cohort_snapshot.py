@@ -1,16 +1,18 @@
 #!/usr/bin/env python3.11
 """
-MaxPain v1.5 research cohort daily snapshot
+MaxPain research cohort daily snapshot
 ~/MaxPain_Project/scripts/pipeline/research_cohort_snapshot.py
 
 Captures the same summary metrics as Metal_Project's 9:15 ET daily_snapshot,
-but for the v1.5 deployable research cohort (37 symbols across bull_put,
-bear_call, inverted_fly, and earnings books). Writes to a separate
-research_cohort_snapshots table in metal_project.db so the live trading book
-and the research cohort stay clearly distinct.
+but for the deployable cohort union from scripts/qualifier/gate_config.py.
+Writes to a separate research_cohort_snapshots table in metal_project.db so
+the live trading book and the research cohort stay clearly distinct.
 
-Cohort source: data/profile/research_cohort_v15.parquet (37 names with
-structure-membership flags). Edit that parquet to add or remove names.
+Cohort source (as of 2026-05-02): the union of every COHORT_* list in
+gate_config.py. Adding a ticker to any cohort there auto-cascades here on
+the next run — no parquet edit needed. Replaces the prior frozen v1.5
+parquet (data/profile/research_cohort_v15.parquet, kept as historical
+reference) which was missing post-v1.5 promotions like KRE.
 
 Reuses Metal_Project's take_snapshot() to ensure schema parity with
 daily_snapshots. SPX is excluded by default — Schwab equity-chain endpoint
@@ -38,7 +40,6 @@ sys.path.insert(0, str(Path.home() / "MaxPain_Project"))
 from lib.snapshot import take_snapshot, current_opex
 
 ROOT = Path.home() / "MaxPain_Project"
-COHORT_PATH = ROOT / "data/profile/research_cohort_v15.parquet"
 DB_PATH = Path.home() / "Metal_Project/data/shared/metal_project.db"
 
 # SPX-side index requires a different Schwab endpoint; skip in equity-chain capture
@@ -56,8 +57,19 @@ COLUMNS = [
 
 
 def load_cohort() -> list[str]:
-    df = pd.read_parquet(COHORT_PATH)
-    return [s for s in df["ticker"].tolist() if s not in SKIP]
+    """Union of every COHORT_* list in gate_config.py, minus SKIP, sorted.
+
+    Auto-cascades cohort additions: a name added to gate_config.py will be
+    captured on the next run with no parquet edits required.
+    """
+    from scripts.qualifier import gate_config as G
+    union: set[str] = set()
+    for attr in dir(G):
+        if attr.startswith("COHORT_"):
+            value = getattr(G, attr)
+            if isinstance(value, (list, tuple, set)):
+                union.update(value)
+    return sorted(s for s in union if s not in SKIP)
 
 
 def write_snapshots(snaps: list[dict]) -> int:
@@ -69,7 +81,7 @@ def write_snapshots(snaps: list[dict]) -> int:
     col_list = ", ".join(COLUMNS)
     rows = []
     for s in snaps:
-        s["cohort"] = "v1.5"
+        s["cohort"] = "gate_config"  # union of COHORT_* in scripts/qualifier/gate_config.py
         s["dividend_flag"] = 1 if s.get("dividend_flag") else 0
         rows.append([s.get(c) for c in COLUMNS])
     cur.executemany(
@@ -271,8 +283,8 @@ def main() -> None:
     today = date.today()
 
     print(f"\n{'='*65}")
-    print(f"  v1.5 Research Cohort Snapshot — {today}  |  OpEx: {opex}  |  "
-          f"{len(cohort)} symbols")
+    print(f"  Research Cohort Snapshot — {today}  |  OpEx: {opex}  |  "
+          f"{len(cohort)} symbols  (gate_config union)")
     print(f"{'='*65}\n")
 
     snaps = []
