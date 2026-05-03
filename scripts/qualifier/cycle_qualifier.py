@@ -50,6 +50,40 @@ ROOT = Path.home() / "MaxPain_Project"
 DB_PATH = Path.home() / "Metal_Project/data/shared/metal_project.db"
 COHORT_PATH = ROOT / "data/profile/research_cohort_v15.parquet"
 QUALIFIER_DIR = ROOT / "data/qualifier"
+ORATS_BY_TICKER = ROOT / "data/orats/by_ticker"
+
+
+import functools
+
+@functools.lru_cache(maxsize=64)
+def zebra_trend_status(symbol: str) -> dict | None:
+    """Persistence-trend check for ZEBRA: sustained downtrend = name has been
+    below its 200-DMA for ≥G.ZEBRA_TREND_BELOW_200DMA_THRESHOLD of the last
+    G.ZEBRA_TREND_LOOKBACK_DAYS trading days. Returns None when ORATS data
+    is missing — the gate fails open in that case (legacy v1 cohort names
+    may not be in the v2 ORATS pool).
+    """
+    p = ORATS_BY_TICKER / f"{symbol}.parquet"
+    if not p.exists():
+        return None
+    try:
+        df = pd.read_parquet(p, columns=["trade_date", "stkPx"])
+    except Exception:
+        return None
+    df = df.dropna(subset=["stkPx"]).drop_duplicates("trade_date").sort_values("trade_date")
+    if len(df) < 200:
+        return None
+    df["ma200"] = df["stkPx"].rolling(200).mean()
+    df = df.dropna(subset=["ma200"])
+    if df.empty:
+        return None
+    tail = df.tail(G.ZEBRA_TREND_LOOKBACK_DAYS)
+    days_below = int((tail["stkPx"] < tail["ma200"]).sum())
+    return {
+        "sustained_downtrend": days_below >= G.ZEBRA_TREND_BELOW_200DMA_THRESHOLD,
+        "days_below": days_below,
+        "lookback": len(tail),
+    }
 
 
 # ─── Live spot lookup for budget-cap gate ─────────────────────────────
@@ -230,6 +264,20 @@ def evaluate_opex_cell(symbol: str, structure: str, window_label: str,
         if spot is not None and spot > cap:
             row["verdict"] = G.VERDICT_SKIP
             row["reason"] = f"spot ${spot:.2f} > ${cap:.0f} budget cap ({structure})"
+            return row
+
+    # 0.6 ZEBRA persistence-trend gate. Suspend a delta-1 stock-replacement
+    # candidate when it has been entrenched below the 200-DMA. Fails open
+    # (no skip) when ORATS history is missing — the v1 cohort uses the
+    # research_cohort_v15 parquet which may not have all symbols.
+    if structure.startswith("zebra"):
+        trend = zebra_trend_status(symbol)
+        if trend is not None and trend["sustained_downtrend"]:
+            row["verdict"] = G.VERDICT_SKIP
+            row["reason"] = (
+                f"sustained downtrend: {trend['days_below']}/{trend['lookback']} "
+                f"days below 200-DMA (threshold: {G.ZEBRA_TREND_BELOW_200DMA_THRESHOLD})"
+            )
             return row
 
     # 1. Hard-pause check (bull_put only)

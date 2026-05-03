@@ -144,6 +144,17 @@ PAPER_SIZED_STRUCTURES = {"bull_put_mp"}  # remove after paper window closes
 MAX_SPOT_ZEBRA = 100.0
 MAX_SPOT_INVERTED_FLY = 100.0
 
+# ZEBRA persistence-trend filter (added 2026-05-03).
+# A delta-1 stock-replacement structure shouldn't fire on a name that has been
+# in a sustained downtrend. The v2 pre-reg's own lesson learned: "binding
+# constraint is *is this name in a sustained uptrend*, not *is this a mega-cap*."
+# Suspend a ZEBRA candidate when ≥ ZEBRA_TREND_BELOW_200DMA_THRESHOLD of the
+# last ZEBRA_TREND_LOOKBACK_DAYS trading days closed below the 200-DMA. Normal
+# cyclical pullbacks (e.g. MSFT/META 80–120 days below) pass; only deeply
+# entrenched downtrends (TTD 252/252, CMG 244/252) are filtered out.
+ZEBRA_TREND_LOOKBACK_DAYS = 252
+ZEBRA_TREND_BELOW_200DMA_THRESHOLD = 200
+
 BUDGET_CAPS = {
     "zebra_tier1": MAX_SPOT_ZEBRA,
     "zebra_tier2": MAX_SPOT_ZEBRA,
