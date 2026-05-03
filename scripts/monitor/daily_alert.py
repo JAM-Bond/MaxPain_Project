@@ -265,42 +265,65 @@ def latest_credit_captured_pct(conn, trade_id: int, entry_credit: float) -> floa
 ZEBRA_STOP_LOSS_PCT = 0.035
 
 
-def zebra_stop_loss_event(conn, symbol: str, entry_date) -> dict | None:
-    """Return {entry_spot, cur_spot, pct_drop} when underlying has dropped
-    >= ZEBRA_STOP_LOSS_PCT from the entry-date spot. None otherwise (incl.
-    when snapshots are missing for entry_date or current).
+ZEBRA_ENTRY_LOOKBACK_DAYS = 5  # tolerance for finding entry-date snapshot
 
-    Uses live_snapshots.current_price — the underlying spot recorded at
-    snapshot time. Any opex_date row works (current_price is the symbol
-    spot, identical across opex_date partitions for a given snapshot_date).
+
+def zebra_stop_loss_event(conn, symbol: str, entry_date) -> dict | None:
+    """Compute ZEBRA stop-loss state for one position.
+
+    Returns a dict with keys:
+      stopped: bool — True when pct_drop >= ZEBRA_STOP_LOSS_PCT
+      error:   str | None — populated when snapshots aren't available; the
+               caller surfaces this as a warning so the alert never silently
+               no-ops on a real position
+      entry_spot, cur_spot, pct_drop, entry_source_date: float / str fields
+               (present on the success path only)
+
+    Snapshot lookup falls back to the closest live_snapshots row within
+    +/- ZEBRA_ENTRY_LOOKBACK_DAYS calendar days of entry_date. Reading
+    current_price from any opex_date row is fine — it's the underlying
+    spot, identical across opex_date partitions on a given snapshot_date.
     """
     if not symbol or entry_date is None:
-        return None
+        return {"stopped": False, "error": "missing symbol or entry_date"}
     entry_str = str(entry_date)[:10]
     entry_row = conn.execute(
-        "SELECT current_price FROM live_snapshots "
-        "WHERE symbol = ? AND snapshot_date = ? AND current_price IS NOT NULL "
+        "SELECT current_price, snapshot_date FROM live_snapshots "
+        "WHERE symbol = ? AND current_price IS NOT NULL "
+        "  AND ABS(julianday(snapshot_date) - julianday(?)) <= ? "
+        "ORDER BY ABS(julianday(snapshot_date) - julianday(?)), snapshot_date "
         "LIMIT 1",
-        (symbol, entry_str),
+        (symbol, entry_str, ZEBRA_ENTRY_LOOKBACK_DAYS, entry_str),
     ).fetchone()
     if not entry_row:
-        return None
+        return {"stopped": False,
+                "error": (f"no live_snapshots row for {symbol} within "
+                          f"{ZEBRA_ENTRY_LOOKBACK_DAYS}d of entry {entry_str} "
+                          f"— stop-loss cannot be evaluated")}
     latest_row = conn.execute(
-        "SELECT current_price FROM live_snapshots "
+        "SELECT current_price, snapshot_date FROM live_snapshots "
         "WHERE symbol = ? AND current_price IS NOT NULL "
         "ORDER BY snapshot_date DESC LIMIT 1",
         (symbol,),
     ).fetchone()
     if not latest_row:
-        return None
+        return {"stopped": False,
+                "error": f"no recent live_snapshots row for {symbol}"}
     entry_spot = float(entry_row[0])
     cur_spot = float(latest_row[0])
     if entry_spot <= 0:
-        return None
+        return {"stopped": False,
+                "error": f"invalid entry_spot {entry_spot} for {symbol} {entry_str}"}
     pct_drop = (entry_spot - cur_spot) / entry_spot
-    if pct_drop >= ZEBRA_STOP_LOSS_PCT:
-        return {"entry_spot": entry_spot, "cur_spot": cur_spot, "pct_drop": pct_drop}
-    return None
+    return {
+        "stopped": pct_drop >= ZEBRA_STOP_LOSS_PCT,
+        "error": None,
+        "entry_spot": entry_spot,
+        "cur_spot": cur_spot,
+        "pct_drop": pct_drop,
+        "entry_source_date": entry_row[1],
+        "current_source_date": latest_row[1],
+    }
 
 
 def detect_dte_checkpoints(positions: pd.DataFrame, conn) -> list[str]:
@@ -371,11 +394,19 @@ def detect_dte_checkpoints(positions: pd.DataFrame, conn) -> list[str]:
 
         elif struct in ("zebra", "zebra_protected"):
             sl = zebra_stop_loss_event(conn, sym, p.get("entry_date"))
-            if sl:
+            if sl and sl.get("error"):
+                actionable.append(
+                    f"⚠ {sym} {struct} {suffix}: stop-loss check FAILED — "
+                    f"{sl['error']}"
+                )
+            elif sl and sl.get("stopped"):
+                src_note = ""
+                if sl.get("entry_source_date") and str(p.get("entry_date"))[:10] != sl["entry_source_date"]:
+                    src_note = f" [entry spot from {sl['entry_source_date']} snapshot]"
                 actionable.append(
                     f"🛑 {sym} {struct} {suffix}: STOP-LOSS — spot ${sl['cur_spot']:.2f} "
                     f"vs entry ${sl['entry_spot']:.2f} (-{sl['pct_drop']*100:.1f}%) — "
-                    f"CLOSE POSITION (≥{ZEBRA_STOP_LOSS_PCT*100:.1f}% rule)"
+                    f"CLOSE POSITION (≥{ZEBRA_STOP_LOSS_PCT*100:.1f}% rule){src_note}"
                 )
             if struct == "zebra_protected" and 0 < dte <= 10:
                 actionable.append(
