@@ -269,7 +269,18 @@ def evaluate_opex_cell(symbol: str, structure: str, window_label: str,
     # inside the DTE window — earnings moves are bimodal and break the carry
     # thesis." Earnings-bias structures bypass: their holding window
     # intentionally straddles the earnings event.
-    if not structure.endswith("_earnings") and earnings_dates:
+    #
+    # ZEBRA bypass (added 2026-05-03): ZEBRA is structurally defined-risk
+    # (max loss = debit at the lower long strike) and behaves like delta-1
+    # stock-replacement. Earnings risk on ZEBRA is no worse than holding the
+    # underlying through earnings. Auto-skip is too conservative — instead
+    # the daily alert fires an earnings-lead warning N days before each
+    # event so the user can decide hold/close per position.
+    is_earnings_exempt = (
+        structure.endswith("_earnings")
+        or structure.startswith("zebra")
+    )
+    if not is_earnings_exempt and earnings_dates:
         in_window = [ed for ed in earnings_dates if target <= ed <= opex]
         if in_window:
             row["verdict"] = G.VERDICT_SKIP

@@ -502,6 +502,68 @@ def detect_dte_checkpoints(positions: pd.DataFrame, conn) -> list[str]:
     return actionable + summary_lines
 
 
+# ZEBRA earnings-lead window: warn N calendar days before an upcoming earnings
+# event for any open ZEBRA. ZEBRA is exempted from the qualifier's earnings
+# auto-skip (it's defined-risk, behaves like delta-1 stock); the policy is to
+# trade through earnings but give the user advance notice to decide hold/close.
+ZEBRA_EARNINGS_LEAD_DAYS = 5
+
+
+def detect_zebra_earnings_warnings(positions: pd.DataFrame) -> list[str]:
+    """For every open ZEBRA / zebra_protected position, fire a warning when
+    an upcoming earnings event for that symbol falls within the lead window."""
+    if positions.empty:
+        return []
+    zebras = positions[positions["structure"].astype(str).str.lower().str.startswith("zebra")]
+    if zebras.empty:
+        return []
+
+    try:
+        from scripts.qualifier.earnings_calendar import load_earnings_calendar
+    except Exception as e:
+        return [f"⚠ ZEBRA earnings-lead check skipped — calendar import failed: {e}"]
+
+    today = date.today()
+    horizon = today + timedelta(days=ZEBRA_EARNINGS_LEAD_DAYS)
+    syms = sorted(zebras["symbol"].dropna().unique().tolist())
+    try:
+        cal = load_earnings_calendar(syms)
+    except Exception as e:
+        return [f"⚠ ZEBRA earnings-lead check skipped — calendar load failed: {e}"]
+    if cal is None or cal.empty:
+        return []
+    cal = cal.copy()
+    cal["earnings_date"] = pd.to_datetime(cal["earnings_date"]).dt.date
+    cal = cal[(cal["earnings_date"] >= today) & (cal["earnings_date"] <= horizon)]
+    if cal.empty:
+        return []
+
+    out = []
+    seen = set()  # one warning per (symbol, earnings_date)
+    for _, p in zebras.iterrows():
+        sym = p.get("symbol")
+        struct = p.get("structure", "zebra")
+        opex_str = p.get("opex_date", "?")
+        match = cal[cal["ticker"] == sym]
+        if match.empty:
+            continue
+        for _, m in match.iterrows():
+            ed = m["earnings_date"]
+            key = (sym, ed)
+            if key in seen:
+                continue
+            seen.add(key)
+            days_to = (ed - today).days
+            band = "TODAY" if days_to == 0 else (
+                "TOMORROW" if days_to == 1 else f"in {days_to}d"
+            )
+            out.append(
+                f"🗓 {sym} {struct} (OpEx {opex_str}): EARNINGS {ed} "
+                f"({band}) — decide hold/close before close on day before"
+            )
+    return out
+
+
 def get_recent_close(symbol: str) -> tuple[float | None, float | None, str | None]:
     """Return (today_close, prior_close, today_date) from ORATS by_ticker.
 
@@ -1262,10 +1324,13 @@ def main():
 
     # DTE checkpoints section
     dte_events = detect_dte_checkpoints(positions, conn)
-    if dte_events:
+    zebra_earnings_events = detect_zebra_earnings_warnings(positions)
+    if dte_events or zebra_earnings_events:
         print(f"\n  DTE CHECKPOINTS")
         print(f"  {'-'*68}")
         for ev in dte_events:
+            print(f"  {ev}")
+        for ev in zebra_earnings_events:
             print(f"  {ev}")
 
     # All-quiet footer (computed before construction enrichment because we
@@ -1276,6 +1341,7 @@ def main():
             and not assignment_events and not entry_window_events
             and not exdiv_events and not actionable_earnings
             and not extreme_events and not if_candidates and not dte_events
+            and not zebra_earnings_events
             and not construction_text):
         print(f"\n  ✓ All quiet — no alerts.")
 
