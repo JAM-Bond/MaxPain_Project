@@ -283,7 +283,7 @@ def detect_dte_checkpoints(positions: pd.DataFrame, conn) -> list[str]:
         sk = p.get("short_strike")
         sk_str = f"{sk:g}" if sk is not None and not pd.isna(sk) else "?"
 
-        is_credit_vertical = struct in ("bull_put", "bear_call", "iron_condor", "iron_fly")
+        is_credit_vertical = struct in ("bull_put", "bull_put_mp", "bear_call", "iron_condor", "iron_fly")
 
         # ── Profit-target alerts (DTE-independent, credit verticals only) ──
         profit_alerted = False
