@@ -509,6 +509,10 @@ def detect_dte_checkpoints(positions: pd.DataFrame, conn) -> list[str]:
 ZEBRA_EARNINGS_LEAD_DAYS = 5
 
 
+# Live-position trend-violation logic moved to scripts/monitor/regime_health.py
+# as part of the unified REGIME HEALTH monitor (system + per-position + history).
+
+
 def detect_zebra_earnings_warnings(positions: pd.DataFrame) -> list[str]:
     """For every open ZEBRA / zebra_protected position, fire a warning when
     an upcoming earnings event for that symbol falls within the lead window."""
@@ -1322,6 +1326,20 @@ def main():
         for c in if_candidates:
             print(f"  {c}")
 
+    # REGIME HEALTH section (system + per-position; persists to history)
+    from scripts.monitor.regime_health import assess_all, persist, render_text
+    regime_assessment = assess_all(conn, date.today(), positions)
+    regime_health_lines = render_text(regime_assessment)
+    if regime_health_lines:
+        print(f"\n  REGIME HEALTH")
+        print(f"  {'-'*68}")
+        for line in regime_health_lines:
+            print(line)
+    try:
+        persist(conn, regime_assessment)
+    except Exception as e:
+        print(f"  ⚠ regime health persistence failed: {e}")
+
     # DTE checkpoints section
     dte_events = detect_dte_checkpoints(positions, conn)
     zebra_earnings_events = detect_zebra_earnings_warnings(positions)
@@ -1341,7 +1359,7 @@ def main():
             and not assignment_events and not entry_window_events
             and not exdiv_events and not actionable_earnings
             and not extreme_events and not if_candidates and not dte_events
-            and not zebra_earnings_events
+            and not zebra_earnings_events and not regime_health_lines
             and not construction_text):
         print(f"\n  ✓ All quiet — no alerts.")
 

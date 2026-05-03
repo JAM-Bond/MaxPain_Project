@@ -155,6 +155,20 @@ MAX_SPOT_INVERTED_FLY = 100.0
 ZEBRA_TREND_LOOKBACK_DAYS = 252
 ZEBRA_TREND_BELOW_200DMA_THRESHOLD = 200
 
+
+# ─── Regime-health monitor (system + per-position) ─────────────────────
+# Daily warning bands for regime degradation. The thresholds match the
+# entry gates; the *_NEAR_BAND values define how close to a violation
+# triggers a 🟡 warning. See scripts/monitor/regime_health.py for the
+# assessor logic and scripts/monitor/daily_alert.py for the renderer.
+
+TERM_SPREAD_NEAR_BAND = 0.005     # term_spread within 0.005 of 0 = 🟡
+VRP_NEAR_BAND = 0.005             # VRP within 0.005 of 0 = 🟡
+SPY_MA200_NEAR_PCT = 0.03         # SPY within 3% of 200-DMA = 🟡
+IVR_NEAR_BAND = 0.10              # IVR within 0.10 of 0.50 = 🟡
+SPOT_MA200_NEAR_PCT = 0.03        # per-position: spot within 3% of 200-DMA = 🟡
+TREND_VELOCITY_LOOKBACK_DAYS = 5  # 5d Δ for velocity readout
+
 BUDGET_CAPS = {
     "zebra_tier1": MAX_SPOT_ZEBRA,
     "zebra_tier2": MAX_SPOT_ZEBRA,
