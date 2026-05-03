@@ -49,6 +49,12 @@ COHORT_ZEBRA_TIER1 = [
 COHORT_ZEBRA_TIER2 = [
     "DIA", "IWM", "GLD", "TJX", "GE", "WMT", "AMD", "PLTR",
     "KRE",  # promoted 2026-05-01 via universe expansion (see ZEBRA_UNIVERSE_EXPANSION_PREREG.md)
+    # v2 universe expansion 2026-05-03 — sub-$100, all six v1 gates pass + the
+    # stricter v2 walk-forward (val median capture ≥ 1.05 AND val ZEBRA mean
+    # ≥ val stock mean × 1.10). 6/11 sub-$100 candidates survived; TNA
+    # excluded as a 3x leveraged ETF (path-dependent decay risk).
+    # See zebra_universe_expansion_v2_promoted.parquet for full audit trail.
+    "CMG", "SCHW", "CSCO", "TTD", "USB",
 ]
 
 # Earnings — promoted in v1.6
