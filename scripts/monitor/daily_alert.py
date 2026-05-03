@@ -464,9 +464,22 @@ def detect_dte_checkpoints(positions: pd.DataFrame, conn) -> list[str]:
                     f"🛡  {sym} {struct} {suffix}: "
                     f"T-{dte} — consider closing protective put for residual value"
                 )
-            if dte <= 3:
+            # ZEBRA exit cadence — TastyTrade-canonical management at T-21,
+            # not held-to-expiry. The "Zero Extrinsic" property only holds
+            # at moderate DTE; past T-21, theta on the ATM short accelerates
+            # faster than on the ITM longs (breaking neutrality) and gamma
+            # sharpens around the short strike (whipping the position).
+            # The held-to-expiry rule was a backtest-mechanic, not a
+            # deployment instruction. Roll to the next 75-DTE expiration.
+            if 3 < dte <= 21:
                 actionable.append(
-                    f"⏰ {sym} {struct} {suffix}: T-{dte} — EXIT CUE (held-to-rule unless stop hit)"
+                    f"🔄 {sym} {struct} {suffix}: T-{dte} — ROLL CUE "
+                    f"(theta/gamma neutrality breaks past T-21; close + open next 75-DTE)"
+                )
+            elif 0 < dte <= 3:
+                actionable.append(
+                    f"⚠ {sym} {struct} {suffix}: T-{dte} — ROLL OVERDUE "
+                    f"(should have rolled at T-21; close before assignment risk)"
                 )
 
         elif struct in ("inverted_fly", "if_pair", "if_single"):
