@@ -258,6 +258,51 @@ def latest_credit_captured_pct(conn, trade_id: int, entry_credit: float) -> floa
     return (entry_credit - mark) / entry_credit * 100
 
 
+# ZEBRA is delta-1 stock-replacement: alert at the same 3.5% spot stop used
+# for stock-only trades (project_options_strategy.md). Threshold applies to
+# the underlying drop from entry, not to the option-position MTM (which for
+# debit structures is dominated by extrinsic decay early in the trade).
+ZEBRA_STOP_LOSS_PCT = 0.035
+
+
+def zebra_stop_loss_event(conn, symbol: str, entry_date) -> dict | None:
+    """Return {entry_spot, cur_spot, pct_drop} when underlying has dropped
+    >= ZEBRA_STOP_LOSS_PCT from the entry-date spot. None otherwise (incl.
+    when snapshots are missing for entry_date or current).
+
+    Uses live_snapshots.current_price — the underlying spot recorded at
+    snapshot time. Any opex_date row works (current_price is the symbol
+    spot, identical across opex_date partitions for a given snapshot_date).
+    """
+    if not symbol or entry_date is None:
+        return None
+    entry_str = str(entry_date)[:10]
+    entry_row = conn.execute(
+        "SELECT current_price FROM live_snapshots "
+        "WHERE symbol = ? AND snapshot_date = ? AND current_price IS NOT NULL "
+        "LIMIT 1",
+        (symbol, entry_str),
+    ).fetchone()
+    if not entry_row:
+        return None
+    latest_row = conn.execute(
+        "SELECT current_price FROM live_snapshots "
+        "WHERE symbol = ? AND current_price IS NOT NULL "
+        "ORDER BY snapshot_date DESC LIMIT 1",
+        (symbol,),
+    ).fetchone()
+    if not latest_row:
+        return None
+    entry_spot = float(entry_row[0])
+    cur_spot = float(latest_row[0])
+    if entry_spot <= 0:
+        return None
+    pct_drop = (entry_spot - cur_spot) / entry_spot
+    if pct_drop >= ZEBRA_STOP_LOSS_PCT:
+        return {"entry_spot": entry_spot, "cur_spot": cur_spot, "pct_drop": pct_drop}
+    return None
+
+
 def detect_dte_checkpoints(positions: pd.DataFrame, conn) -> list[str]:
     """For each open placed=1 position, fire DTE-based and profit-target checkpoint alerts.
 
@@ -324,17 +369,22 @@ def detect_dte_checkpoints(positions: pd.DataFrame, conn) -> list[str]:
                 if not profit_alerted:
                     bare_21dte_by_opex.setdefault(opex_str, []).append(f"{sym} {struct} K={sk_str}")
 
-        elif struct == "zebra_protected":
-            if dte <= 10 and dte > 0:
+        elif struct in ("zebra", "zebra_protected"):
+            sl = zebra_stop_loss_event(conn, sym, p.get("entry_date"))
+            if sl:
+                actionable.append(
+                    f"🛑 {sym} {struct} {suffix}: STOP-LOSS — spot ${sl['cur_spot']:.2f} "
+                    f"vs entry ${sl['entry_spot']:.2f} (-{sl['pct_drop']*100:.1f}%) — "
+                    f"CLOSE POSITION (≥{ZEBRA_STOP_LOSS_PCT*100:.1f}% rule)"
+                )
+            if struct == "zebra_protected" and 0 < dte <= 10:
                 actionable.append(
                     f"🛡  {sym} {struct} {suffix}: "
                     f"T-{dte} — consider closing protective put for residual value"
                 )
-
-        elif struct == "zebra":
             if dte <= 3:
                 actionable.append(
-                    f"⚠ {sym} {struct} {suffix}: T-{dte} — EXPIRATION APPROACHING (held-to-rule spec)"
+                    f"⏰ {sym} {struct} {suffix}: T-{dte} — EXIT CUE (held-to-rule unless stop hit)"
                 )
 
         elif struct in ("inverted_fly", "if_pair", "if_single"):
