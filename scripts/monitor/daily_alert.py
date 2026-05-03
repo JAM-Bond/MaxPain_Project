@@ -242,20 +242,65 @@ def trading_days_to(opex_date) -> int:
     return max(0, len(pd.bdate_range(today, opex_date)) - 1)
 
 
-def latest_credit_captured_pct(conn, trade_id: int, entry_credit: float) -> float | None:
-    """For credit spreads: % of max credit captured = (entry - current_mark) / entry × 100.
-    Returns None if no daily mark exists or entry_credit is non-positive (debit trade)."""
+MARK_STALE_AFTER_DAYS = 2  # warn if latest mark older than this many calendar days
+
+
+def credit_captured_status(conn, trade_id: int, entry_credit: float) -> dict | None:
+    """For credit spreads: status of latest daily mark.
+
+    Return shape:
+      {pct, mark_date, stale, error}
+        pct        — % of credit captured = (entry - mark) / entry * 100
+        mark_date  — date of latest mark in spread_score_daily (str or None)
+        stale      — True when mark is older than MARK_STALE_AFTER_DAYS or missing
+        error      — human-readable warning string, or None when fresh
+
+    Returns None for non-applicable rows (debit structures like ZEBRA).
+    """
     if entry_credit is None or entry_credit <= 0:
-        return None  # debit trade (e.g. zebra) — different math
+        return None  # debit trade — different math
     row = conn.execute(
-        "SELECT mark_credit FROM spread_score_daily "
+        "SELECT mark_credit, mark_date FROM spread_score_daily "
         "WHERE trade_id = ? ORDER BY mark_date DESC LIMIT 1",
         (int(trade_id),),
     ).fetchone()
     if row is None or row[0] is None:
-        return None
+        return {
+            "pct": None,
+            "mark_date": None,
+            "stale": True,
+            "error": (f"no marks found in spread_score_daily for trade_id={trade_id} — "
+                      "profit-target alert cannot fire (mark daemon disabled?)"),
+        }
     mark = float(row[0])
-    return (entry_credit - mark) / entry_credit * 100
+    mark_date_str = row[1]
+    pct = (entry_credit - mark) / entry_credit * 100
+    age_days = None
+    try:
+        md = pd.to_datetime(mark_date_str).date()
+        age_days = (date.today() - md).days
+    except Exception:
+        age_days = None
+    if age_days is not None and age_days > MARK_STALE_AFTER_DAYS:
+        return {
+            "pct": pct,
+            "mark_date": mark_date_str,
+            "stale": True,
+            "error": (f"latest mark is {age_days}d old (mark_date {mark_date_str}) — "
+                      "profit-target alert may be inaccurate (mark daemon disabled?)"),
+        }
+    return {
+        "pct": pct,
+        "mark_date": mark_date_str,
+        "stale": False,
+        "error": None,
+    }
+
+
+def latest_credit_captured_pct(conn, trade_id: int, entry_credit: float) -> float | None:
+    """Backward-compat shim: returns just the pct (or None)."""
+    s = credit_captured_status(conn, trade_id, entry_credit)
+    return s["pct"] if s else None
 
 
 # ZEBRA is delta-1 stock-replacement: alert at the same 3.5% spot stop used
@@ -356,8 +401,14 @@ def detect_dte_checkpoints(positions: pd.DataFrame, conn) -> list[str]:
         # ── Profit-target alerts (DTE-independent, credit verticals only) ──
         profit_alerted = False
         if is_credit_vertical and "id" in p and not pd.isna(p["id"]) and not pd.isna(p.get("entry_credit", None)):
-            pct = latest_credit_captured_pct(conn, p["id"], float(p["entry_credit"]))
-            if pct is not None:
+            s = credit_captured_status(conn, p["id"], float(p["entry_credit"]))
+            if s and s.get("error"):
+                actionable.append(
+                    f"⚠ {sym} {struct} K={sk_str} {suffix}: profit-target check — "
+                    f"{s['error']}"
+                )
+            if s and s.get("pct") is not None and not s.get("stale"):
+                pct = s["pct"]
                 if pct >= 80:
                     actionable.append(
                         f"🎯 {sym} {struct} K={sk_str} {suffix}: "
