@@ -36,6 +36,7 @@ from lib.opex_calendar import third_friday  # noqa: E402
 from scripts.monitor.moneyness_lookup import recommended_short_delta, recommended_if_wing  # noqa: E402
 from structures import (  # noqa: E402
     open_zebra, open_inverted_fly, open_bull_put, open_bear_call,
+    open_bull_put_mp,
 )
 import config as _bt_config  # noqa: E402
 
@@ -64,7 +65,26 @@ STRUCTURE_TO_OPENER = {
     "bull_put_earnings": open_bull_put,
     "bear_call": open_bear_call,
     "bear_call_earnings": open_bear_call,
+    # bull_put_mp routes through a per-call wrapper that loads max_pain
+    # from live_snapshots — see _open_bull_put_mp_route in build_construction_block.
 }
+
+
+def _load_max_pain(symbol: str, expiry: str) -> Optional[float]:
+    """Latest max_pain from live_snapshots for (symbol, opex_date=expiry)."""
+    import sqlite3
+    db_path = Path.home() / "Metal_Project/data/shared/metal_project.db"
+    try:
+        with sqlite3.connect(str(db_path)) as conn:
+            row = conn.execute(
+                "SELECT max_pain FROM live_snapshots "
+                "WHERE symbol = ? AND opex_date = ? AND max_pain IS NOT NULL "
+                "ORDER BY snapshot_date DESC LIMIT 1",
+                (symbol, expiry),
+            ).fetchone()
+    except Exception:
+        return None
+    return float(row[0]) if row and row[0] is not None else None
 
 
 # ─── Risk metrics per structure ───────────────────────────────────────
@@ -287,7 +307,11 @@ def build_construction_block(
 
     Never raises — alert should not fail because one chain fetch failed.
     """
-    opener = STRUCTURE_TO_OPENER.get(structure)
+    is_mp_anchored = structure == "bull_put_mp"
+    if is_mp_anchored:
+        opener = open_bull_put_mp
+    else:
+        opener = STRUCTURE_TO_OPENER.get(structure)
     if opener is None:
         return {"ok": False, "text": "", "html": "", "error": f"unknown structure {structure!r}"}
 
@@ -300,11 +324,18 @@ def build_construction_block(
         return {"ok": False, "text": "", "html": "",
                 "error": f"empty Schwab chain for {symbol} @ {expiry}"}
 
-    # Per-ticker moneyness pick for vertical structures (bull_put / bear_call).
-    # ZEBRA uses its own selection logic. IF uses BFLY_WING_PCT_SPOT below.
+    # Per-ticker moneyness pick for delta-anchored vertical structures.
+    # bull_put_mp uses MP-anchored strike selection so the delta rec doesn't
+    # apply. ZEBRA uses its own selection logic. IF uses BFLY_WING_PCT_SPOT.
     rec = None
     if_wing_rec = None
-    if structure.startswith("bull_put") or structure.startswith("bear_call"):
+    mp_value = None
+    if is_mp_anchored:
+        mp_value = _load_max_pain(symbol, expiry)
+        if mp_value is None:
+            return {"ok": False, "text": "", "html": "",
+                    "error": f"bull_put_mp: max_pain unavailable in live_snapshots for {symbol} @ {expiry}"}
+    elif structure.startswith("bull_put") or structure.startswith("bear_call"):
         rec = recommended_short_delta(symbol, structure, exit_rule="mgd50")
         _bt_config.VERTICAL_SHORT_DELTA = rec.short_delta
     elif structure.startswith("inverted_fly"):
@@ -312,17 +343,30 @@ def build_construction_block(
         _bt_config.BFLY_WING_PCT_SPOT = if_wing_rec.wing_pct
 
     try:
-        pos = opener(chain, pd.Timestamp.today(), pd.Timestamp(expiry))
+        if is_mp_anchored:
+            pos = opener(chain, pd.Timestamp.today(), pd.Timestamp(expiry),
+                         max_pain=mp_value)
+        else:
+            pos = opener(chain, pd.Timestamp.today(), pd.Timestamp(expiry))
     except Exception as e:
         return {"ok": False, "text": "", "html": "",
                 "error": f"{structure} construction error for {symbol}: {e}"}
 
     if pos is None:
-        return {"ok": False, "text": "", "html": "",
-                "error": f"{structure} could not be constructed for {symbol} (no qualifying strikes)"}
+        if is_mp_anchored and spot < mp_value:
+            err = (f"bull_put_mp: spot ${spot:.2f} < MP ${mp_value:.2f} — "
+                   f"Phase 2c entry rule SKIPPED for {symbol}")
+        else:
+            err = f"{structure} could not be constructed for {symbol} (no qualifying strikes)"
+        return {"ok": False, "text": "", "html": "", "error": err}
 
     try:
         m = _metrics_for(pos, structure)
+        if is_mp_anchored:
+            m["structure_label"] = (
+                f"Bull Put (MP-anchored, T-5) — put credit spread "
+                f"@ MP ${mp_value:.2f}, paper-test"
+            )
         text = _render_text(symbol, structure, expiry, spot, m)
         html = _render_html(symbol, structure, expiry, spot, m)
         if rec is not None:

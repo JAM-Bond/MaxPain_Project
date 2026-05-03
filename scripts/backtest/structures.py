@@ -122,6 +122,59 @@ def open_bull_put(chain: pd.DataFrame, entry_date, expiration) -> Optional[Posit
                     notes={"short_put_k": legs[0].strike, "wing_width": actual_wing})
 
 
+def open_bull_put_mp(
+    chain: pd.DataFrame, entry_date, expiration,
+    max_pain: Optional[float] = None,
+) -> Optional[Position]:
+    """T-5 bull put credit spread anchored to max pain.
+
+    Short put = strike nearest max_pain. Long put = next strike below.
+    Skip when spot < max_pain (Phase 2c entry rule — MP-anchor only helps
+    when spot sits above MP, which is the bull-regime case the lift was
+    measured under). Phase 2c +$0.072/cycle vs 30Δ; Phase 2f signal-gated
+    variant (contango+VRP>0) lifts to +$0.019/cycle mean, 87% win.
+    """
+    if max_pain is None:
+        return None
+    if chain.empty or "stkPx" not in chain.columns:
+        return None
+    spot = float(chain["stkPx"].iloc[0])
+    if spot < max_pain:
+        return None
+
+    puts = chain.dropna(subset=["pBidPx", "pAskPx", "delta", "pMidIv"])
+    puts = puts[(puts["pBidPx"] > 0) & (puts["pAskPx"] > 0)]
+    if puts.empty:
+        return None
+
+    sp_idx = (puts["strike"] - max_pain).abs().idxmin()
+    sp_row = puts.loc[sp_idx]
+    short_K = float(sp_row["strike"])
+
+    below = puts[puts["strike"] < short_K]
+    if below.empty:
+        return None
+    lp_row = below.loc[below["strike"].idxmax()]
+
+    sp = price_short_put(sp_row); lp = price_long_put(lp_row)
+    if None in (sp, lp):
+        return None
+    credit = sp - lp
+    if credit <= 0:
+        return None
+    legs = [
+        Leg("short", "put", float(sp_row["strike"]), sp, float(sp_row["delta"]), float(sp_row["pMidIv"])),
+        Leg("long",  "put", float(lp_row["strike"]), lp, float(lp_row["delta"]), float(lp_row["pMidIv"])),
+    ]
+    actual_wing = abs(legs[0].strike - legs[1].strike)
+    return Position(structure="bull_put_mp", legs=legs, entry_date=entry_date,
+                    entry_credit=credit, expiration=expiration,
+                    underlying_entry=spot,
+                    notes={"short_put_k": legs[0].strike,
+                           "wing_width": actual_wing,
+                           "max_pain": float(max_pain)})
+
+
 def open_bear_call(chain: pd.DataFrame, entry_date, expiration) -> Optional[Position]:
     """Short 30Δ call + long call wing above (scaled to spot in v2)."""
     sc_row = select_by_delta(chain, C.VERTICAL_SHORT_DELTA)

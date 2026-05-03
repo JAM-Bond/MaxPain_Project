@@ -58,6 +58,15 @@ COHORT_EARNINGS_BULL_PUT = [
 COHORT_EARNINGS_BEAR_CALL = ["INTC"]   # single-name carve-out
 COHORT_EARNINGS_INVERTED_FLY = ["PLTR"]  # single-name carve-out
 
+# T-5 MP-anchored bull put — paper-test cohort.
+# Phase 2c reliable pinners (project_mp_phase2c_verticals.md). Strict subset
+# of validated names; broaden after May/Jun/Jul paper cycles confirm fills,
+# pin behavior, and signal-gate frequency. Per project_mp_phase2f_rescue.md
+# the gate is regime.bull_put_signal_active (contango + VRP>0). Spot < MP
+# entries are filtered inside the opener (open_bull_put_mp).
+COHORT_BULL_PUT_T5_PAPER = ["HYG", "QQQ", "PG", "IYR", "XLU", "EFA"]
+
+
 # Covered call on credit ETFs — DEMOTED 2026-04-30 on live-execution
 # falsification. Backtest validated BKLN / JNK / HYG at slip=0.05 (mean +7.7%
 # / +7.2% / +4.1% annualized), but live attempts on the May 2026 chain showed
@@ -99,6 +108,12 @@ ENTRY_WINDOW_TOLERANCE = 1
 SIZE_DEFAULT = 1.0
 SIZE_DOWNSIZE = 0.5      # soft-downsize trigger fires
 SIZE_PAUSE = 0.0         # hard-pause trigger fires
+
+# Per-structure paper-test sizing override. When active, entries for the
+# named structure are sized at PAPER_SIZE_FACTOR regardless of regime — used
+# for one-cycle paper validation before promoting to live.
+PAPER_SIZE_FACTOR = 0.5
+PAPER_SIZED_STRUCTURES = {"bull_put_mp"}  # remove after paper window closes
 
 
 # ─── Budget caps (capital-outlay structures only) ─────────────────────
@@ -153,6 +168,7 @@ def is_in_cohort(symbol: str, structure: str) -> bool:
     """True if symbol is in the deployable cohort for structure."""
     cohorts = {
         "bull_put": COHORT_BULL_PUT,
+        "bull_put_mp": COHORT_BULL_PUT_T5_PAPER,
         "bear_call": COHORT_BEAR_CALL,
         "inverted_fly_pair": COHORT_INVERTED_FLY_PAIR,
         "inverted_fly_single": COHORT_INVERTED_FLY_SINGLE,

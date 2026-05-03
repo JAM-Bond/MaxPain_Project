@@ -242,10 +242,10 @@ def evaluate_opex_cell(symbol: str, structure: str, window_label: str,
     # 2. Regime gate per structure
     gate_ok = True
     gate_reason = ""
-    if structure == "bull_put":
+    if structure in ("bull_put", "bull_put_mp"):
         if not regime.get("bull_put_signal_active"):
             gate_ok = False
-            gate_reason = "bull_put gate off (need contango + VRP>0)"
+            gate_reason = f"{structure} gate off (need contango + VRP>0)"
     elif structure == "bear_call":
         if not regime.get("h1_active"):
             gate_ok = False
@@ -293,6 +293,11 @@ def evaluate_opex_cell(symbol: str, structure: str, window_label: str,
         row["verdict"] = G.VERDICT_DOWNSIZE
         row["size"] = G.SIZE_DOWNSIZE
         row["reason"] = "GO at half size (soft-downsize trigger active)"
+    elif structure in G.PAPER_SIZED_STRUCTURES:
+        row["verdict"] = G.VERDICT_GO
+        row["size"] = G.PAPER_SIZE_FACTOR
+        row["reason"] = (f"entry day for {window_label} (OpEx {opex}) — "
+                         f"paper-test sized at {G.PAPER_SIZE_FACTOR}x")
     else:
         row["verdict"] = G.VERDICT_GO
         row["size"] = G.SIZE_DEFAULT
@@ -351,9 +356,9 @@ def build_opex_verdicts(regime: dict, windows: dict, run_date: date,
             ))
     if "bull_put_t5" in windows:
         target, opex, days_until = windows["bull_put_t5"]
-        for sym in G.COHORT_BULL_PUT:
+        for sym in G.COHORT_BULL_PUT_T5_PAPER:
             rows.append(evaluate_opex_cell(
-                sym, "bull_put", "T-5 (Window B)",
+                sym, "bull_put_mp", "T-5 (Window B / MP-anchored)",
                 target, opex, days_until, regime, run_date, ed(sym), spots,
             ))
 
