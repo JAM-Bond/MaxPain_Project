@@ -58,13 +58,22 @@ COHORT_EARNINGS_BULL_PUT = [
 COHORT_EARNINGS_BEAR_CALL = ["INTC"]   # single-name carve-out
 COHORT_EARNINGS_INVERTED_FLY = ["PLTR"]  # single-name carve-out
 
-# T-5 MP-anchored bull put — paper-test cohort.
-# Phase 2c reliable pinners (project_mp_phase2c_verticals.md). Strict subset
-# of validated names; broaden after May/Jun/Jul paper cycles confirm fills,
-# pin behavior, and signal-gate frequency. Per project_mp_phase2f_rescue.md
-# the gate is regime.bull_put_signal_active (contango + VRP>0). Spot < MP
-# entries are filtered inside the opener (open_bull_put_mp).
-COHORT_BULL_PUT_T5_PAPER = ["HYG", "QQQ", "PG", "IYR", "XLU", "EFA"]
+# T-5 MP-anchored bull put — TABLED 2026-05-03.
+# Cohort intentionally emptied. The wiring (opener, qualifier branch, alert
+# routing, ledger tag, mark daemon coverage) is left intact so this can be
+# re-enabled by repopulating the list. Reasons for tabling:
+#   1. Phase 2/3 of the MP test suite (project_mp_directional_gravity_test.md)
+#      showed pin is not causal — price does not move toward MP more than
+#      secular drift. Two of the proposed paper names (HYG, QQQ) showed
+#      anti-convergence on the T-5 directional test.
+#   2. The 0.50 credit/width framework floor is structurally unreachable on
+#      MP-anchored short puts (2026-05-03 widened-wings backtest:
+#      mp_phase2c_widened_wings.py, 0.3% floor pass rate).
+#   3. The Phase 2f +$0.019/cycle "edge" comes from the SPY contango+VRP>0
+#      signal gate, not from MP anchoring per se — a generic premium-selling
+#      regime filter would likely produce the same lift on 30Δ shorts.
+# See project_mp_tabled_decision.md for the full reasoning.
+COHORT_BULL_PUT_T5_PAPER: list[str] = []
 
 
 # Covered call on credit ETFs — DEMOTED 2026-04-30 on live-execution
