@@ -2,8 +2,8 @@
 SMTP alert sender for MaxPain — supports plain-text and HTML bodies.
 
 Lifted from Metal_Project/scripts/pipeline/cron_alert.py with multipart
-HTML extension. Reads SMTP credentials from Metal_Project/config/api_keys.env
-(same env shared via Tranche 1 of the migration).
+HTML extension. Reads SMTP credentials from MaxPain_Project/config/api_keys.env
+(decoupled from Metal_Project 2026-05-04).
 
 Usage:
     from lib.email_alert import send_html_alert
@@ -17,13 +17,11 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from pathlib import Path
 
-ENV_PATH = Path.home() / "Metal_Project/config/api_keys.env"
+ENV_PATH = Path.home() / "MaxPain_Project/config/api_keys.env"
 
 
 def _load_env() -> dict[str, str]:
-    """Read KEY=VALUE pairs from api_keys.env. Lightweight inline loader to
-    avoid importing Metal_Project.config.paths (which collides with
-    scripts/backtest/config.py when both are on sys.path)."""
+    """Read KEY=VALUE pairs from api_keys.env. Lightweight inline loader."""
     env: dict[str, str] = {}
     if not ENV_PATH.exists():
         return env

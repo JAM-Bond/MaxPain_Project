@@ -86,6 +86,36 @@ def zebra_trend_status(symbol: str) -> dict | None:
     }
 
 
+def bull_put_ma_pct(symbol: str) -> float | None:
+    """Return (spot - ma200) / ma200 for the latest available trade_date.
+    Used by the bull_put MA-bucket DOWNSIZE gate
+    (project_bullput_below_ma_findings.md, 2026-05-05). Returns None when
+    history is missing — caller fails open.
+    """
+    p = ORATS_BY_TICKER / f"{symbol}.parquet"
+    if not p.exists():
+        return None
+    try:
+        df = pd.read_parquet(p, columns=["trade_date", "stkPx"])
+    except Exception:
+        return None
+    df = (df.dropna(subset=["stkPx"])
+            .drop_duplicates("trade_date")
+            .sort_values("trade_date"))
+    if len(df) < 200:
+        return None
+    df["ma200"] = df["stkPx"].rolling(200).mean()
+    df = df.dropna(subset=["ma200"])
+    if df.empty:
+        return None
+    last = df.iloc[-1]
+    spot = float(last["stkPx"])
+    ma = float(last["ma200"])
+    if ma <= 0:
+        return None
+    return (spot - ma) / ma
+
+
 # ─── Live spot lookup for budget-cap gate ─────────────────────────────
 
 def fetch_schwab_spots(symbols: list[str]) -> dict[str, float]:
@@ -361,6 +391,29 @@ def evaluate_opex_cell(symbol: str, structure: str, window_label: str,
         row["verdict"] = G.VERDICT_GO
         row["size"] = G.SIZE_DEFAULT
         row["reason"] = f"entry day for {window_label} (OpEx {opex})"
+
+    # 5. Bull_put MA-bucket downsize gate (added 2026-05-05).
+    # Per project_bullput_below_ma_findings.md: bull_put on names trading more
+    # than 10% BELOW their 200-DMA at entry has worse expectancy in the
+    # OTM/ATM sub-cells (-$0.045 and -$0.034/cycle respectively at slip=0.50).
+    # Don't SKIP — the held-to-expiry ITM cell is positive in this bucket
+    # (+$0.037/cycle). Half-size to mark the regime risk; the position-health
+    # monitor flags 🔴 separately so the human reviewer can override.
+    if (row["verdict"] in (G.VERDICT_GO, G.VERDICT_DOWNSIZE)
+            and structure.startswith("bull_put")):
+        ma_pct = bull_put_ma_pct(symbol)
+        if (ma_pct is not None
+                and ma_pct < G.BULL_PUT_BELOW_MA_DOWNSIZE_THRESHOLD):
+            ma_note = (f"spot {ma_pct*100:+.1f}% vs 200-DMA "
+                        f"(below {G.BULL_PUT_BELOW_MA_DOWNSIZE_THRESHOLD*100:.0f}% "
+                        "MA threshold — regime-conditional adverse)")
+            if row["verdict"] == G.VERDICT_GO:
+                row["verdict"] = G.VERDICT_DOWNSIZE
+                row["size"] = G.SIZE_DOWNSIZE
+                row["reason"] = f"DOWNSIZE: {ma_note} [orig: {row['reason']}]"
+            else:
+                # Already DOWNSIZE (soft-downsize); keep size, annotate
+                row["reason"] = f"{row['reason']}; also {ma_note}"
     return row
 
 

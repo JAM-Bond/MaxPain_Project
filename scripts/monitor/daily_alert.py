@@ -1226,14 +1226,28 @@ def main():
                         help="Print only — no SMTP, no DB writes")
     args = parser.parse_args()
 
-    # Capture all stdout from the existing alert sections so we can both
-    # print to the log AND wrap into an HTML email body.
+    # Capture all stdout into `buf` AND keep cron log working by tee-ing.
+    # Earlier `with redirect_stdout(buf):` only enclosed the conn= line, so
+    # `text_body` ended up empty and the has_events guard at the bottom of
+    # main() always hit the "truly quiet" early-return. Fixed 2026-05-07.
+    class _Tee:
+        def __init__(self, *streams): self.streams = streams
+        def write(self, s):
+            for st in self.streams:
+                try: st.write(s)
+                except Exception: pass
+        def flush(self):
+            for st in self.streams:
+                try: st.flush()
+                except Exception: pass
+
     buf = io.StringIO()
     construction_text = ""
     construction_html = []
+    _real_stdout = sys.stdout
+    sys.stdout = _Tee(_real_stdout, buf)
 
-    with redirect_stdout(buf):
-        conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH)
 
     print(f"\n{'='*72}")
     print(f"  MaxPain Daily Alert — {datetime.now().strftime('%Y-%m-%d %H:%M')}")
@@ -1340,6 +1354,24 @@ def main():
     except Exception as e:
         print(f"  ⚠ regime health persistence failed: {e}")
 
+    # Open-position close marks (live mid/natural/limit + capture %)
+    # Sourced from scripts/monitor/close_helper.py — same module the user runs
+    # ad-hoc via CLI. Embedding here surfaces 50%-capture and >25% candidates
+    # at alert time, including the natural-vs-mid gap that flagged GS this week.
+    close_text = ""
+    try:
+        from scripts.monitor.close_helper import build_close_block
+        close_block = build_close_block()
+        close_text = close_block.get("text", "")
+        close_errors = close_block.get("errors", [])
+        if close_text and close_text != "No open placed positions.":
+            print()
+            print(close_text)
+            for err in close_errors[:5]:
+                print(f"  ⚠ {err}")
+    except Exception as e:
+        print(f"  ⚠ close_helper enrichment failed: {e}")
+
     # DTE checkpoints section
     dte_events = detect_dte_checkpoints(positions, conn)
     zebra_earnings_events = detect_zebra_earnings_warnings(positions)
@@ -1372,9 +1404,9 @@ def main():
     print(f"\n{'='*72}\n")
     conn.close()
 
-    # ── Out of redirect_stdout context ──
+    # ── Restore real stdout; buf has already been tee'd in parallel ──
+    sys.stdout = _real_stdout
     text_body = buf.getvalue()
-    sys.stdout.write(text_body)  # to actual stdout (cron log)
 
     # ── Email (HTML if constructions present, plain text otherwise) ──
     if args.dry_run or args.no_email:
@@ -1383,7 +1415,8 @@ def main():
     n_constructions = len(construction_html)
     has_events = any(tag in text_body for tag in ("⚠", "REGIME EVENT", "DTE CHECKPOINTS",
                                                    "ENTRY WINDOW", "ASSIGNMENT ZONE",
-                                                   "EX-DIV ASSIGNMENT", "EARNINGS RISK"))
+                                                   "EX-DIV ASSIGNMENT", "EARNINGS RISK",
+                                                   "OPEN POSITIONS"))
     if not n_constructions and not has_events:
         return  # Truly quiet — don't spam inbox
 

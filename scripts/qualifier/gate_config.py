@@ -22,12 +22,21 @@ COHORT_BULL_PUT = [
     "INTC", "WFC", "XLU", "HYG",
     # v2 expansion 2026-05-02 (Tier A + top Tier B; see UNIVERSE_EXPANSION_V2_PREREG.md)
     "AVGO", "JPM", "GS", "GNRC", "SMH", "RCL", "FSLR", "AMAT",
+    # v3 expansion 2026-05-06 — top 10 of 19 unpromoted v2 walk-forward survivors
+    # All cleared train+val+direction+BH-FDR+val_mean gates at slip=0.50.
+    # Source: data/profile/universe_expansion_v2_candidates.parquet, ranked by val_mean.
+    # Liquidity sanity confirmed live 2026-05-06 (ATM bid-ask ≤ 14% of mid).
+    "COF", "NET", "CIEN", "GOOG", "MRK", "GLW", "COP", "MS", "CMG", "EXPE",
 ]
 
 COHORT_BEAR_CALL = [
     "SPX", "SPY", "QQQ", "DIA", "IWM", "WMT",
     # v2 expansion 2026-05-02 (Tier B; deploy when H1 fires)
     "EL", "TGT", "BA",
+    # v3 expansion 2026-05-06 — top 5 of 9 unpromoted v2 walk-forward survivors
+    # Same methodology + gates as bull_put v3. Deploy when H1 gate fires
+    # (SPY < 200dma + IVR > 0.5).
+    "MMM", "DVN", "HUM", "ADBE", "IBM",
 ]
 
 COHORT_INVERTED_FLY_PAIR = [
@@ -40,6 +49,11 @@ COHORT_INVERTED_FLY_SINGLE = [
     "SCCO", "GOLD", "CLF",
     # v2 expansion 2026-05-02 (Tier A; standalone IF — methodology was per-ticker walk-forward without bull_put pairing)
     "ISRG", "XLK", "PEP", "STX",
+    # v3 expansion 2026-05-06 — top 3 of 9 unpromoted v2 walk-forward survivors
+    # under the new $300 spot cap. LRCX is the standout (+$7.37 val_mean, 4-7×
+    # the next best). MCD/JNJ also clear walk-forward; AMAT/TER excluded —
+    # spot > $300 produces NOC-sized debits.
+    "LRCX", "MCD", "JNJ",
 ]
 
 COHORT_ZEBRA_TIER1 = [
@@ -142,7 +156,14 @@ PAPER_SIZED_STRUCTURES = {"bull_put_mp"}  # remove after paper window closes
 # grows.
 
 MAX_SPOT_ZEBRA = 100.0
-MAX_SPOT_INVERTED_FLY = 100.0
+# Inverted_fly cap raised 2026-05-06 from $100 to $300. Original $100 was
+# anchored on a $620 NOC IF example; the policy intent ("avoid NOC-sized MTM
+# swings") allows admitting names whose debit/max-loss is comparable to
+# already-tolerated structures (KRE zebra ~$900, SOXX hedge ~$1,500). $300 cap
+# admits LRCX/MCD/JNJ (debit $13-25 → max loss $1.3-2.5K). Excludes AMAT/TER
+# at $400+ which produce NOC-sized debits (~$3.4K). See
+# project_universe_expansion_v3.md and feedback_expensive_names_verticals_only.md.
+MAX_SPOT_INVERTED_FLY = 300.0
 
 # ZEBRA persistence-trend filter (added 2026-05-03).
 # A delta-1 stock-replacement structure shouldn't fire on a name that has been
@@ -154,6 +175,25 @@ MAX_SPOT_INVERTED_FLY = 100.0
 # entrenched downtrends (TTD 252/252, CMG 244/252) are filtered out.
 ZEBRA_TREND_LOOKBACK_DAYS = 252
 ZEBRA_TREND_BELOW_200DMA_THRESHOLD = 200
+
+# Bull_put MA-bucket downsize threshold (added 2026-05-05 from
+# project_bullput_below_ma_findings.md). When the underlying's spot is
+# more than this percent BELOW its 200-DMA at entry, downgrade GO → DOWNSIZE.
+# Universe-scale bull_put expectancy is ~flat across MA buckets at slip=0.50,
+# but the BELOW_10PCT × OTM cell loses -$0.045/cycle. Don't SKIP (ITM held-to-
+# expiry is positive in this bucket); just half-size to mark regime risk.
+BULL_PUT_BELOW_MA_DOWNSIZE_THRESHOLD = -0.10
+
+
+# Credit-vertical loss-cap floor — minimum credit / width ratio for a
+# tradeable construction. Calibrated 2026-05-05 from actual closed-trade
+# win-rate (73% on N=26). Was 0.50 (assumed 67% win rate + strict managed-50%
+# exit). Real win-rate buys headroom below the theoretical floor.
+# Breakeven win-rate at managed-50% exit by C/W: 0.30→82%, 0.35→78%, 0.40→75%,
+# 0.50→67%. At 73% actual, 0.35 is the floor with a small edge buffer.
+# Re-evaluate after another 30 closed cycles. See
+# feedback_loss_cap_discipline.md for the full derivation.
+MIN_CREDIT_WIDTH = 0.35
 
 
 # ─── Regime-health monitor (system + per-position) ─────────────────────
