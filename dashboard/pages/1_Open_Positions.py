@@ -59,6 +59,7 @@ with tab_open:
         # Display columns + formatting
         display = df.drop(columns=["id", "_health_detail", "_natural_pnl",
                                    "_stop_trigger", "_stop_dollar", "_pct_to_stop",
+                                   "_t21_sort", "_t21_emoji",
                                    "P/L @ mid", "Natural"], errors="ignore").copy()
         st.dataframe(
             display,
@@ -104,6 +105,12 @@ with tab_open:
                 st.markdown("**Health & stop**")
                 st.write(f"{row['Health']}  {row['_health_detail']}")
                 st.write(f"Capture: **{row['Capture %']:+.0f}%**")
+                if row.get("_t21_emoji"):
+                    st.markdown(
+                        f"<div class='alert-box'>{row['_t21_emoji']} "
+                        f"T-21: <b>{row['T-21']}</b> — close or roll regardless of capture %</div>",
+                        unsafe_allow_html=True,
+                    )
                 if row.get("_stop_trigger") is not None:
                     pct = row["_pct_to_stop"] or 0
                     st.write(
@@ -119,7 +126,10 @@ with tab_open:
                 if row.get("_stop_trigger") is not None:
                     st.markdown(
                         f"**Stop GTC**:  BUY +{row['Qty']} {row['Symbol']} VERTICAL "
-                        f"{row['OpEx']} {row['Strikes']} @ **{row['_stop_trigger']:.2f}** LMT GTC"
+                        f"{row['OpEx']} {row['Strikes']} "
+                        f"STP **{row['_stop_trigger']:.2f}** "
+                        f"LMT **{row['_stop_trigger'] + 0.10:.2f}** "
+                        f"MARK GTC"
                     )
 
 # ── CLOSED TAB ────────────────────────────────────────────────────────────────

@@ -40,6 +40,20 @@ def open_positions_df() -> pd.DataFrame:
         except Exception:
             dte = None
 
+        # T-21 management cue (TastyTrade-canonical). long_put exempt
+        # (single-leg debit, no roll); zebra/credit verticals all on the rule.
+        if r.spread_type == "long_put" or dte is None:
+            t21_emoji, t21_label = "", ""
+        elif dte > 25:
+            t21_emoji, t21_label = "", ""
+        elif dte > 21:
+            t21_emoji, t21_label = "🟡", f"in {dte - 21}d"
+        elif dte == 21:
+            t21_emoji, t21_label = "🔴", "today"
+        else:
+            t21_emoji, t21_label = "🔴", f"{21 - dte}d past"
+        t21_str = f"{t21_emoji} {t21_label}".strip() if t21_emoji else "—"
+
         capture = r.capture_at_mid
         h = health_map.get(r.symbol, ("⚪", "n/a"))
         health_emoji, health_detail = h
@@ -67,6 +81,11 @@ def open_positions_df() -> pd.DataFrame:
             stop_status_str = "—"
             pct_to_stop = None
 
+        # Sort priority: T-21 hits to the top, then approaching, then by capture
+        if t21_emoji == "🔴":   t21_sort = 0
+        elif t21_emoji == "🟡": t21_sort = 1
+        else:                    t21_sort = 2
+
         records.append({
             "Symbol":      r.symbol,
             "Structure":   r.spread_type,
@@ -74,6 +93,7 @@ def open_positions_df() -> pd.DataFrame:
             "Qty":         r.shares,
             "OpEx":        r.opex_date,
             "DTE":         dte,
+            "T-21":        t21_str,
             "Entry":       round(r.entry_credit, 2),
             "Mid close":   round(r.mid_close, 2),
             "Limit close": round(r.limit_close, 2),
@@ -90,10 +110,14 @@ def open_positions_df() -> pd.DataFrame:
             "_stop_trigger": stop_trigger,
             "_stop_dollar": stop_dollar,
             "_pct_to_stop": round(pct_to_stop, 0) if pct_to_stop is not None else None,
+            "_t21_sort":   t21_sort,
+            "_t21_emoji":  t21_emoji,
         })
 
     df = pd.DataFrame(records)
-    df = df.sort_values("Capture %", ascending=False).reset_index(drop=True)
+    df = df.sort_values(
+        ["_t21_sort", "Capture %"], ascending=[True, False]
+    ).reset_index(drop=True)
     return df
 
 

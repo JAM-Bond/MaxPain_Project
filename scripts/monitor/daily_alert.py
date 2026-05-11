@@ -1216,6 +1216,50 @@ def derive_subject(text_body: str, n_constructions: int) -> str:
     return f"MaxPain Alert — daily — {today}"
 
 
+def _derive_severity(subject: str, text_body: str) -> str:
+    if "RED" in subject or "⚠" in text_body:
+        return "RED"
+    if "YELLOW" in subject:
+        return "YELLOW"
+    if "actionable trade" in subject:
+        return "ACTION"
+    return "INFO"
+
+
+def _persist_run(subject: str, text_body: str, html_body: str,
+                 n_constructions: int, has_events: bool) -> None:
+    """Archive this alert run as one row in daily_alert_runs (one row per day,
+    INSERT OR REPLACE so the latest run wins). Used by the dashboard's Daily
+    Alert page for browsable history + post-mortem reconstruction."""
+    import sqlite3
+    conn = sqlite3.connect(str(DB_PATH))
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS daily_alert_runs (
+            run_date TEXT PRIMARY KEY,
+            run_timestamp TEXT NOT NULL,
+            subject TEXT,
+            severity TEXT,
+            text_body TEXT,
+            html_body TEXT,
+            n_constructions INTEGER,
+            has_events INTEGER,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    today = datetime.now().strftime("%Y-%m-%d")
+    severity = _derive_severity(subject, text_body)
+    conn.execute("""
+        INSERT OR REPLACE INTO daily_alert_runs
+            (run_date, run_timestamp, subject, severity, text_body, html_body,
+             n_constructions, has_events)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """, (today, datetime.now().isoformat(timespec="seconds"),
+          subject, severity, text_body, html_body,
+          int(n_constructions), int(bool(has_events))))
+    conn.commit()
+    conn.close()
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--verbose", action="store_true",
@@ -1408,8 +1452,9 @@ def main():
     sys.stdout = _real_stdout
     text_body = buf.getvalue()
 
-    # ── Email (HTML if constructions present, plain text otherwise) ──
-    if args.dry_run or args.no_email:
+    # ── Email + persist ──
+    # Dry-run: print only, no DB writes, no email (per --dry-run docstring).
+    if args.dry_run:
         return
 
     n_constructions = len(construction_html)
@@ -1417,16 +1462,31 @@ def main():
                                                    "ENTRY WINDOW", "ASSIGNMENT ZONE",
                                                    "EX-DIV ASSIGNMENT", "EARNINGS RISK",
                                                    "OPEN POSITIONS"))
-    if not n_constructions and not has_events:
-        return  # Truly quiet — don't spam inbox
+    quiet = (not n_constructions) and (not has_events)
 
+    # Compose subject + HTML always (used by both email + persistence).
     try:
-        from lib.email_alert import send_html_alert
         subject = derive_subject(text_body, n_constructions)
         html_body = build_email_html(text_body, construction_html)
-        send_html_alert(subject, text_body, html_body)
     except Exception as e:
-        print(f"  email send raised: {e}")
+        print(f"  compose failed: {e}")
+        return
+
+    # Email — skip on --no-email or on truly quiet days (don't spam inbox).
+    if not args.no_email and not quiet:
+        try:
+            from lib.email_alert import send_html_alert
+            send_html_alert(subject, text_body, html_body)
+        except Exception as e:
+            print(f"  email send raised: {e}")
+
+    # Persist — always (except dry-run above). Quiet days are still useful in
+    # the archive: "no events that day" is itself a state worth preserving for
+    # post-mortem reconstruction.
+    try:
+        _persist_run(subject, text_body, html_body, n_constructions, has_events)
+    except Exception as e:
+        print(f"  persist failed: {e}")
 
 
 if __name__ == "__main__":

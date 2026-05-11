@@ -83,10 +83,21 @@ def inject_css() -> None:
       font-weight: 600 !important;
   }
   div[data-testid="stMetricValue"] * { color: #f0f6fc !important; }
-  div[data-testid="stMetricLabel"] {
+  div[data-testid="stMetricLabel"],
+  [data-testid="stMetricLabel"] p,
+  [data-testid="stMetricLabel"] div,
+  [data-testid="stMetricLabel"] span,
+  [data-testid="stMetricLabel"] label {
       font-family: 'IBM Plex Mono', monospace !important;
-      font-size: 0.72rem !important;
-      color: #c9d1d9 !important;
+      font-size: 0.82rem !important;
+      color: #f0f6fc !important;
+      font-weight: 600 !important;
+      opacity: 1 !important;
+  }
+  /* Streamlit sometimes wraps the label in a flex container with reduced
+     opacity — neutralize that too */
+  [data-testid="stMetric"] [data-testid="stMetricLabel"] {
+      opacity: 1 !important;
   }
   div[data-testid="stMetricDelta"] { font-family: 'IBM Plex Mono', monospace !important; }
 
@@ -138,15 +149,23 @@ def inject_css() -> None:
      dark surface for readability */
   .page-sub, .stat-item, .delta-label, .ring-name, .ring-detail,
   .info-box, .section-header, .fedwatch-label,
-  div[data-testid="stMetricLabel"],
   .stCaption, [data-testid="stCaptionContainer"] {
       color: #c9d1d9 !important;
   }
   .stMarkdown p, .stMarkdown li, .stMarkdown span { color: #e6edf3 !important; }
 
-  /* Selectbox / dropdown text legibility */
-  .stSelectbox label, .stTextInput label, .stTabs label {
-      color: #e6edf3 !important;
+  /* Selectbox / dropdown / input / date-picker label legibility */
+  .stSelectbox label, .stTextInput label, .stTabs label,
+  .stDateInput label, .stNumberInput label, .stTimeInput label,
+  .stRadio label, .stCheckbox label, .stMultiSelect label,
+  [data-testid="stWidgetLabel"],
+  [data-testid="stWidgetLabel"] p,
+  [data-testid="stWidgetLabel"] div,
+  [data-testid="stWidgetLabel"] span,
+  div[data-baseweb="form-control-container"] label {
+      color: #f0f6fc !important;
+      font-weight: 600 !important;
+      opacity: 1 !important;
   }
 </style>
 """, unsafe_allow_html=True)

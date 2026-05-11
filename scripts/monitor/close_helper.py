@@ -25,6 +25,7 @@ from __future__ import annotations
 import sqlite3
 import sys
 from dataclasses import dataclass
+from datetime import date, datetime
 from pathlib import Path
 from typing import Optional
 
@@ -282,10 +283,66 @@ def _capture_band(c: float) -> str:
     return "🔴"
 
 
+def _dte_for(opex_date: str) -> Optional[int]:
+    try:
+        d = datetime.strptime(opex_date, "%Y-%m-%d").date()
+        return (d - date.today()).days
+    except Exception:
+        return None
+
+
+def _t21_band(dte: Optional[int]) -> tuple[str, str]:
+    """T-21 management state. TastyTrade-canonical: at 21 DTE the gamma:theta
+    ratio flips against you — close/roll regardless of capture %.
+       DTE > 25  → quiet ("", "")
+       DTE 22-25 → 🟡 approaching
+       DTE ≤ 21  → 🔴 hit/past
+    """
+    if dte is None:
+        return ("", "")
+    if dte > 25:
+        return ("", "")
+    if dte > 21:
+        return ("🟡", f"T-21 in {dte - 21}d")
+    if dte == 21:
+        return ("🔴", "T-21 today — close/roll")
+    return ("🔴", f"T-21 hit ({21 - dte}d past) — close/roll now")
+
+
+def _t21_actions(rows: list[CloseRow]) -> list[tuple[CloseRow, int, str, str]]:
+    """Subset of rows where T-21 is approaching or past. Sorted DTE asc
+    (most-urgent first). Excludes long_put (single-leg debit, no roll cue)
+    but keeps zebra (T-21 still applies to short call leg)."""
+    out = []
+    for r in rows:
+        if r.spread_type == "long_put":
+            continue
+        dte = _dte_for(r.opex_date)
+        emoji, label = _t21_band(dte)
+        if not emoji:
+            continue
+        out.append((r, dte if dte is not None else 0, emoji, label))
+    out.sort(key=lambda x: x[1])
+    return out
+
+
 def _render_text(rows: list[CloseRow], errors: list[str]) -> str:
     if not rows:
         return "No closeable positions."
     lines = []
+
+    t21 = _t21_actions(rows)
+    if t21:
+        lines.append("T-21 MANAGEMENT — close or roll regardless of capture %")
+        lines.append("")
+        for r, dte, emoji, label in t21:
+            strikes = f"{r.short_strike:g}/{r.long_strike:g}"
+            lines.append(
+                f"  {emoji} {r.symbol:<6} id={r.id:<3} {r.spread_type:<14} "
+                f"{r.opex_date} {strikes:>11} (DTE {dte})  — {label}"
+            )
+        lines.append("")
+
     lines.append("OPEN POSITIONS — close-side mark (sorted by capture %)")
     lines.append("")
     lines.append(f"  {'id':>4} {'sym':<6} {'OpEx':<10} {'structure':<14} "
@@ -315,6 +372,34 @@ def _render_text(rows: list[CloseRow], errors: list[str]) -> str:
 def _render_html(rows: list[CloseRow], errors: list[str]) -> str:
     if not rows:
         return "<p>No closeable positions.</p>"
+
+    t21_html = ""
+    t21 = _t21_actions(rows)
+    if t21:
+        t21_rows = []
+        for r, dte, emoji, label in t21:
+            color = "#a00" if "hit" in label or "today" in label else "#a80"
+            t21_rows.append(
+                f"<tr>"
+                f"<td>{emoji}</td>"
+                f"<td><b>{r.symbol}</b></td>"
+                f"<td align=right>id={r.id}</td>"
+                f"<td>{r.spread_type}</td>"
+                f"<td>{r.opex_date}</td>"
+                f"<td align=right>{r.short_strike:g}/{r.long_strike:g}</td>"
+                f"<td align=center>DTE {dte}</td>"
+                f"<td style='color:{color};font-weight:bold'>{label}</td>"
+                f"</tr>"
+            )
+        t21_html = (
+            "<div style='font-family:Menlo,Consolas,monospace;font-size:12px;"
+            "margin-bottom:10px'>"
+            "<div style='font-weight:bold;margin-bottom:4px'>"
+            "T-21 MANAGEMENT — close or roll regardless of capture %</div>"
+            "<table style='border-collapse:collapse;font-size:12px'>"
+            f"<tbody>{''.join(t21_rows)}</tbody></table></div>"
+        )
+
     head = ("<tr style='background:#eee'>"
             "<th>id</th><th>sym</th><th>OpEx</th><th>structure</th>"
             "<th>strikes</th><th>qty</th>"
@@ -352,6 +437,7 @@ def _render_html(rows: list[CloseRow], errors: list[str]) -> str:
         err_html = ("<div style='font-size:11px;color:#888;margin-top:4px'>"
                     "Errors: " + "; ".join(errors) + "</div>")
     return (
+        f"{t21_html}"
         "<div style='font-family:Menlo,Consolas,monospace;font-size:12px'>"
         "<div style='font-weight:bold;margin-bottom:4px'>"
         "OPEN POSITIONS — close-side mark (sorted by capture %)</div>"
