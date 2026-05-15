@@ -240,6 +240,21 @@ VERDICT_PENDING = "PENDING"         # entry window upcoming
 VERDICT_SKIP = "SKIP"               # gate not satisfied this cycle
 VERDICT_PAUSE = "PAUSE"             # hard pause active for this structure
 VERDICT_NOT_IN_COHORT = "NOT_IN_COHORT"
+VERDICT_SKIP_CONCENTRATION = "SKIP_CONCENTRATION"  # capped by sector-concentration rule
+
+
+# ─── Sector-concentration cap ─────────────────────────────────────────
+#
+# Triggered by 2026-05-12 evidence: WFC + JPM stopped together in the same
+# JUN bull_put cohort — a correlation cluster, not two independent risks.
+# Cap at 2 single names per GICS sector per OpEx; ETFs exempt. Within an
+# over-concentrated sector, rank by verdict tier (GO > DOWNSIZE), then
+# alphabetical as deterministic tiebreaker. Lower-ranked candidates →
+# SKIP_CONCENTRATION verdict with sector_rank_position annotation.
+#
+# Detail: project_sector_concentration_cap.md.
+
+SECTOR_CAP_MAX_PER_OPEX = 2
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────

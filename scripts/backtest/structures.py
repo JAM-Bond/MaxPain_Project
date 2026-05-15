@@ -451,6 +451,101 @@ def open_zebra(chain: pd.DataFrame, entry_date, expiration) -> Optional[Position
     )
 
 
+def open_anti_zebra(chain: pd.DataFrame, entry_date, expiration) -> Optional[Position]:
+    """Anti-ZEBRA — bearish mirror of ZEBRA.
+
+    Buy 2× ITM put at ~−0.70 put delta (call delta ~0.30, strike ABOVE spot).
+    Sell 1× ATM put at ~−0.50 put delta (call delta ~0.50, strike near spot).
+
+    Same zero-theta extrinsic rule: short_extrinsic >= 2 × long_extrinsic.
+    Defined risk: max loss = total debit. Synthetic short-stock equivalent
+    with capped downside risk and slight downward leverage.
+
+    NOTE on the ORATS schema: the `delta` column is the CALL delta. A 0.50
+    call delta is approximately a -0.50 put delta (ATM). A 0.30 call delta
+    is approximately a -0.70 put delta (ITM put = strike above spot).
+    """
+    # Short put: target call_delta ~0.50 (ATM)
+    sp_row = select_by_delta(chain, C.ZEBRA_SHORT_DELTA, tolerance=C.ZEBRA_SHORT_TOL)
+    if sp_row is None:
+        return None
+    spot = float(sp_row["stkPx"])
+    sp_px = price_short_put(sp_row)
+    if sp_px is None:
+        return None
+    K_short = float(sp_row["strike"])
+    # Short PUT extrinsic = price - max(0, K - spot)
+    sp_extrinsic = sp_px - max(0.0, K_short - spot)
+
+    # Search long-put candidates. ITM puts have strike > spot, so K_long > K_short.
+    # Call-delta band [0.10, 0.45] corresponds to put-delta band [-0.90, -0.55] —
+    # the practitioner search window mirroring ZEBRA's [0.55, 0.90] call-delta
+    # band on the call side.
+    candidates = chain.dropna(subset=["delta", "pMidIv", "pBidPx", "pAskPx"])
+    candidates = candidates[candidates["strike"] > K_short]
+    if candidates.empty:
+        return None
+    candidates = candidates[(candidates["delta"] >= 0.10) & (candidates["delta"] <= 0.45)]
+    if candidates.empty:
+        return None
+    # Sort by deepest ITM first (lowest call delta = highest absolute put delta)
+    candidates = candidates.sort_values("delta", ascending=True)
+
+    # Preferred long-put call_delta = 1 - ZEBRA_LONG_DELTA (mirror around ATM).
+    # ZEBRA_LONG_DELTA = 0.70 → preferred call_delta = 0.30 for anti-ZEBRA longs.
+    target_long_call_delta = 1.0 - C.ZEBRA_LONG_DELTA
+
+    best = None
+    for _, lp_row in candidates.iterrows():
+        if lp_row["pMidIv"] < C.MIN_IV_FOR_PRICING:
+            continue
+        lp_px = price_long_put(lp_row)
+        if lp_px is None:
+            continue
+        K_long = float(lp_row["strike"])
+        lp_extrinsic = lp_px - max(0.0, K_long - spot)
+        if sp_extrinsic >= 2.0 * lp_extrinsic:
+            delta_score = abs(float(lp_row["delta"]) - target_long_call_delta)
+            if best is None or delta_score < best[3]:
+                best = (lp_row, lp_px, 2.0 * lp_px - sp_px, delta_score)
+
+    if best is None:
+        return None
+    lp_row, lp, debit, _ = best
+    if debit <= 0:
+        return None
+
+    K_long = float(lp_row["strike"])
+    lp_extrinsic = lp - max(0.0, K_long - spot)
+    # Convert call-delta to put-delta for storage / reporting
+    long_put_delta = float(lp_row["delta"]) - 1.0
+    short_put_delta = float(sp_row["delta"]) - 1.0
+
+    legs = [
+        Leg("long",  "put", K_long,  lp, long_put_delta,  float(lp_row["pMidIv"])),
+        Leg("long",  "put", K_long,  lp, long_put_delta,  float(lp_row["pMidIv"])),
+        Leg("short", "put", K_short, sp_px, short_put_delta, float(sp_row["pMidIv"])),
+    ]
+    return Position(
+        structure="anti_zebra",
+        legs=legs, entry_date=entry_date,
+        entry_credit=-debit,
+        expiration=expiration, underlying_entry=spot,
+        notes={
+            "long_strike": K_long,
+            "short_strike": K_short,
+            "debit": debit,
+            "long_extrinsic_each": lp_extrinsic,
+            "long_extrinsic_total": 2.0 * lp_extrinsic,
+            "short_extrinsic": sp_extrinsic,
+            "extrinsic_cushion": sp_extrinsic - 2.0 * lp_extrinsic,
+            "entry_delta": 2.0 * long_put_delta - short_put_delta,
+            "capital_outlay": 100.0 * spot,
+            "capital_efficiency": debit / spot,
+        },
+    )
+
+
 STRUCTURES = {
     "iron_condor":    open_iron_condor,
     "iron_fly":       open_iron_fly,
@@ -460,6 +555,7 @@ STRUCTURES = {
     "bear_call":      open_bear_call,
     "jade_lizard":    open_jade_lizard,
     "zebra":          open_zebra,
+    "anti_zebra":     open_anti_zebra,
 }
 
 
@@ -529,6 +625,9 @@ def max_profit(pos: Position) -> float:
     if pos.structure == "zebra":
         # Unbounded upside; for sizing, use the practical max as 2x debit
         return float("inf")
+    if pos.structure == "anti_zebra":
+        # Bounded downside (spot can go to zero); max profit ≈ short_strike * 100 - debit
+        return max(0.0, pos.notes["short_strike"] * 100.0 + pos.entry_credit)
     raise ValueError(f"Unknown structure {pos.structure}")
 
 
@@ -549,5 +648,8 @@ def max_loss(pos: Position) -> float:
         return pos.notes["short_put_k"] - pos.entry_credit
     if pos.structure == "zebra":
         # Defined risk = the debit paid (entry_credit is negative for ZEBRA)
+        return -pos.entry_credit
+    if pos.structure == "anti_zebra":
+        # Same: defined risk = debit paid
         return -pos.entry_credit
     raise ValueError(f"Unknown structure {pos.structure}")

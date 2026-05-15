@@ -578,15 +578,22 @@ def _prior_monthly_opex(zebra_expiry: str) -> str:
     return third_friday(prev_y, prev_m).isoformat()
 
 
-def _pick_put_at_strike(chain, target_strike: float):
-    """Pick the put row with strike closest to target. Requires valid pBidPx/pAskPx."""
+def _pick_put_at_strike(chain, target_strike: float, tolerance_pct: float = 0.02):
+    """Pick the put row with strike closest to target, within tolerance_pct of target.
+
+    Tolerance is expressed as a fraction of the target strike (e.g. 0.02 = 2%).
+    Old call sites that relied on a $1 absolute tolerance: the new contract
+    handles low-priced names via the percentage (a 2% tolerance on a $50 strike
+    is $1, matching prior behavior) while still working for $700 SPY.
+    """
     sub = chain.dropna(subset=["pBidPx", "pAskPx"])
     sub = sub[sub["pBidPx"] > 0]
     if sub.empty:
         return None
     idx = (sub["strike"] - target_strike).abs().idxmin()
     row = sub.loc[idx]
-    return row if abs(row["strike"] - target_strike) <= 1.0 else None
+    dollar_tolerance = max(1.0, target_strike * tolerance_pct)
+    return row if abs(row["strike"] - target_strike) <= dollar_tolerance else None
 
 
 def build_zebra_protected_block(symbol: str, zebra_expiry: str) -> dict:
@@ -715,6 +722,142 @@ def build_zebra_protected_block(symbol: str, zebra_expiry: str) -> dict:
     return {"ok": True, "text": "\n".join(text_lines), "html": html, "error": None}
 
 
+# ─── ZEBRA with regime-conditional long-put overlay (Phase 1+2 validated) ─
+
+def build_zebra_with_overlay_block(symbol: str, zebra_expiry: str,
+                                   rule: dict | None = None) -> dict:
+    """ZEBRA + regime-conditional long put on the SAME expiration.
+
+    Phase 1 + Phase 2 backtests validated:
+      - Both legs share the parent ZEBRA expiration (matched-expiry).
+      - Both legs held to OpEx (no managed exit on the put).
+      - Strike selection follows the regime via zebra_overlay_rule.
+
+    If rule is None, computes it from the live DB.
+    Returns the standard {ok, text, html, error} shape.
+    """
+    if rule is None:
+        from scripts.monitor.zebra_overlay_rule import regime_overlay_rule
+        rule = regime_overlay_rule()
+
+    # 1. Base ZEBRA on the OpEx chain
+    chain, spot = fetch_chain_with_greeks(symbol, zebra_expiry)
+    if chain is None or chain.empty:
+        return {"ok": False, "text": "", "html": "",
+                "error": f"empty chain for {symbol} @ {zebra_expiry}"}
+    zebra_pos = open_zebra(chain, pd.Timestamp.today(), pd.Timestamp(zebra_expiry))
+    if zebra_pos is None:
+        return {"ok": False, "text": "", "html": "",
+                "error": f"ZEBRA construction failed for {symbol}"}
+
+    # 2. Pick overlay put per the rule on the SAME chain
+    pct_offset = rule["strike_pct_offset"]
+    target_strike = spot * (1.0 + pct_offset)
+    put_row = _pick_put_at_strike(chain, target_strike,
+                                  tolerance_pct=rule["tolerance_pct"])
+    if put_row is None:
+        return {"ok": False, "text": "", "html": "",
+                "error": (f"no qualifying put within {rule['tolerance_pct']*100:.1f}% of "
+                          f"${target_strike:.2f} on {zebra_expiry} ({rule['rule_label']})")}
+
+    put_strike = float(put_row["strike"])
+    put_bid = float(put_row["pBidPx"])
+    put_ask = float(put_row["pAskPx"])
+    put_mid = (put_bid + put_ask) / 2.0
+    put_delta_call = float(put_row.get("delta", float("nan")))
+    put_delta = put_delta_call - 1.0 if not pd.isna(put_delta_call) else float("nan")
+    actual_offset = (put_strike / spot) - 1.0
+
+    # 3. Combined metrics
+    long_leg = zebra_pos.legs[0]
+    short_leg = zebra_pos.legs[2]
+    zebra_debit = zebra_pos.notes["debit"]
+    total_debit = zebra_debit + put_mid
+    combined_net_delta = zebra_pos.notes["entry_delta"] + put_delta
+
+    # 4. Render text
+    legs_rows = [
+        ("Long  call  ITM",  "+2", long_leg.strike, _display_delta(long_leg), long_leg.price, zebra_expiry),
+        ("Short call  ATM",  "-1", short_leg.strike, _display_delta(short_leg), short_leg.price, zebra_expiry),
+        (f"Long  put   {rule['rule_label'].split()[0]}",  "+1", put_strike, put_delta, put_mid, zebra_expiry),
+    ]
+    text_lines = [
+        f"  ZEBRA + overlay — {symbol} (spot ${spot:.2f})",
+        f"    Expiration:        {zebra_expiry}  (75-DTE, matched on both legs)",
+        f"    Regime:            {rule['regime_summary']}",
+        f"    Overlay rule:      {rule['rule_label']}  →  target ${target_strike:.2f}",
+        f"    Selected put:      ${put_strike:.2f} ({actual_offset:+.1%} vs spot)",
+        "",
+        f"    {'LEG':<18} {'QTY':>4}  {'STRIKE':>7}  {'DELTA':>6}   {'PRICE':>6}   EXP",
+    ]
+    for leg, qty, strike, delta, price, exp in legs_rows:
+        text_lines.append(
+            f"    {leg:<18} {qty:>4}  ${strike:>6.2f}  {delta:>+6.2f}   ${price:>5.2f}   {exp}"
+        )
+    text_lines += [
+        "",
+        f"    Total debit                  ${total_debit:.2f}  (ZEBRA ${zebra_debit:.2f} + put ${put_mid:.2f})",
+        f"    Put bid/ask                  ${put_bid:.2f} / ${put_ask:.2f}",
+        f"    Capital outlay / contract    ${total_debit*100:.0f}",
+        f"    Initial net delta            {combined_net_delta:+.2f}",
+        f"    ZEBRA structural max loss    ${zebra_debit*100:.0f} if spot < ${long_leg.strike:.2f} at expiry",
+        f"    Put protection               intrinsic below ${put_strike:.2f} at OpEx (held to expiry)",
+        "",
+        "    Exit:    Both legs held to OpEx. NO managed exit on the put (Phase 2 M1-M4 all rejected).",
+        f"    Rule:    {rule['rationale'][0]}",
+        f"             {rule['rationale'][1]}",
+        f"             {rule['rationale'][2]}",
+    ]
+
+    # 5. Render HTML
+    legs_html = "".join(
+        f"<tr><td>{leg}</td><td align=center>{qty}</td>"
+        f"<td align=right>${strike:.2f}</td>"
+        f"<td align=right>{delta:+.2f}</td>"
+        f"<td align=right>${price:.2f}</td>"
+        f"<td align=right style='color:#666;font-size:11px'>{exp}</td></tr>"
+        for (leg, qty, strike, delta, price, exp) in legs_rows
+    )
+    summary_html = "".join(
+        f"<tr><td>{lab}</td><td>{val}</td></tr>" for lab, val in [
+            ("Regime", rule["regime_summary"]),
+            ("Overlay rule", f"{rule['rule_label']} → target ${target_strike:.2f}"),
+            ("Selected put", f"${put_strike:.2f} ({actual_offset:+.1%} vs spot)"),
+            ("Total debit", f"${total_debit:.2f}  (ZEBRA ${zebra_debit:.2f} + put ${put_mid:.2f})"),
+            ("Capital outlay", f"${total_debit*100:.0f} / contract"),
+            ("Initial net delta", f"{combined_net_delta:+.2f}"),
+            ("Max loss", f"${zebra_debit*100:.0f} if spot < ${long_leg.strike:.2f} at expiry"),
+            ("Exit policy", "held to OpEx — no managed exit on either leg"),
+        ]
+    )
+    rationale_html = "<br>".join(
+        f"<span style='color:#888;font-size:11px'>{ln}</span>" for ln in rule["rationale"]
+    )
+    html = f"""
+<div style="font-family:Menlo,Consolas,monospace;border:1px solid #268bd2;
+            border-left:4px solid #268bd2;padding:10px;margin:8px 0;background:#f0f8ff">
+  <div style="font-weight:bold;margin-bottom:4px">ZEBRA + overlay — {symbol} ({rule['rule_label']})</div>
+  <div style="color:#555;margin-bottom:6px">
+    spot ${spot:.2f} · expiry {zebra_expiry} · both legs same expiration, held to OpEx
+  </div>
+  <table style="border-collapse:collapse;font-size:13px;margin-bottom:6px">
+    <thead><tr style="background:#eee">
+      <th align=left style="padding:2px 8px">LEG</th>
+      <th style="padding:2px 8px">QTY</th>
+      <th style="padding:2px 8px">STRIKE</th>
+      <th style="padding:2px 8px">DELTA</th>
+      <th style="padding:2px 8px">PRICE</th>
+      <th style="padding:2px 8px">EXP</th>
+    </tr></thead>
+    <tbody>{legs_html}</tbody>
+  </table>
+  <table style="border-collapse:collapse;font-size:13px"><tbody>{summary_html}</tbody></table>
+  <div style="font-size:12px;color:#666;margin-top:6px">{rationale_html}</div>
+</div>
+"""
+    return {"ok": True, "text": "\n".join(text_lines), "html": html, "error": None}
+
+
 # ─── CLI for ad-hoc preview ───────────────────────────────────────────
 
 if __name__ == "__main__":
@@ -722,13 +865,16 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="Preview a construction block.")
     ap.add_argument("symbol")
     ap.add_argument("structure",
-                    choices=list(STRUCTURE_TO_OPENER.keys()) + ["zebra_protected"])
+                    choices=list(STRUCTURE_TO_OPENER.keys())
+                    + ["zebra_protected", "zebra_overlay"])
     ap.add_argument("expiry", help="YYYY-MM-DD")
     ap.add_argument("--html", action="store_true", help="emit HTML instead of text")
     args = ap.parse_args()
 
     if args.structure == "zebra_protected":
         result = build_zebra_protected_block(args.symbol, args.expiry)
+    elif args.structure == "zebra_overlay":
+        result = build_zebra_with_overlay_block(args.symbol, args.expiry)
     else:
         result = build_construction_block(args.symbol, args.structure, args.expiry)
     if not result["ok"]:

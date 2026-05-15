@@ -479,9 +479,22 @@ Pre-registered and tested 2026-04-25 (docs/ZEBRA_PREREG.md). All four pre-reg hy
 \'95  \b Entry (VALIDATED).\b0  ~75 calendar days to expiration on a monthly OpEx; snap to nearest trading day. Buy 2\'d7 long call at ~70\uc0\u916 ; sell 1\'d7 short call at ~50\uc0\u916  (ATM). Same expiration.\
 \'95  \b Practitioner construction (VALIDATED).\b0  In every cycle, search ITM call strikes from 0.55\uc0\u916  to 0.90\uc0\u916  and pick the candidate closest to 0.70\uc0\u916  whose extrinsic value satisfies short_extrinsic \uc0\u8805  2\'d7 long_extrinsic. The literal 70/50 spec satisfies this rule on only some cycles; the practitioner search satisfies it on ~95%. If no candidate satisfies the rule on a given chain, skip the cycle.\
 \'95  \b Pre-flight check.\b0  At entry, compute (short_extrinsic \'96 2\'d7 long_extrinsic). This is the extrinsic cushion. Must be \uc0\u8805  $0 or do not open.\
-\'95  \b Exit (VALIDATED).\b0  Held to expiration. No managed exit. The structure earns its expected payoff at expiry; closing early forfeits the gamma-driven excess return that compounds in the final weeks.\
-\'95  \b Sizing.\b0  Capital-outlay-based, NOT per-contract. See Position Sizing section. Single AMZN/GOOGL contracts can carry $50K\'96$70K of capital outlay; SPY/QQQ contracts are roughly $7K\'96$10K each. Sizing must be aligned to book equity, not to a per-contract target.\
-\'95  \b Execution.\b0  Open all three legs simultaneously on a single combo ticket. The two long calls share the same strike, so the broker should execute them as 2-for-1 buy and 1-for-1 sell. Slip sensitivity is minimal (slip=0.25 vs 0.50 differs by <$0.05/share on cohort means).\
+\'95  \b Exit (VALIDATED).\b0  Held to expiration. No managed exit on the parent ZEBRA. The structure earns its expected payoff at expiry; closing early forfeits the gamma-driven excess return that compounds in the final weeks.\
+\'95  \b Long-put overlay at entry (VALIDATED, regime-conditional).\b0  Every ZEBRA position is paired at entry with a single long put on the same underlying, sharing the parent ZEBRA's expiration. Both legs are held to OpEx. Phase 1 backtest (934 cycles, tier-1 cohort) validated a 10%-OTM put as a structural lift over bare ZEBRA: +$9.50/cycle cohort mean, 4/4 walk-forward splits positive. Phase 2 strike-grid sweep then revealed the strike choice is regime-conditional: the pooled-mean winner (deep OTM) is a bull-regime artifact; in the 2022-2024 bear window the ranking inverts and ITM strikes deliver +$15-20/cycle of additional lift over OTM. The operational rule:\
+\
+\'a0\'a0\'a0\'95  \b Stage 1-2 (bull, cascade rings green):\b0  10-15% OTM put. Cheap insurance, 4/4 splits positive, current default.\
+\'a0\'a0\'a0\'95  \b Stage 3 (fragile, any cascade ring yellow):\b0  ATM put. Only strike that delivered positive or zero lift in every walk-forward split; splits the cost/protection trade-off.\
+\'a0\'a0\'a0\'95  \b Stage 4-5 (bear gate open):\b0  strike depends on the active-drawdown qualifier. \b If SPY has made a new 60-day low within the past 30 days\b0  (active-deepening bear): \b 5% ITM put.\b0  Captures the 2022-style drawdown lift. \b If the bear gate is open but SPY has NOT made a new 60-day low in the past 30 days\b0  (troughing / unwinding): \b 10% OTM put\b0  \'97 the underlying is moving up off the trough and ITM puts decay against the move. Intra-bear stability testing on the 2022-2024 window showed ITM5 lift +$49/cyc in 2022 (active deepening) but \'96$9/cyc in 2023 and \'96$9/cyc in 2024 (unwinding/recovery), making the active-drawdown qualifier the operationally important split.\
+\
+\'a0\'a0\'a0Capital outlay per overlay rises 3-4\'d7 across the OTM\uc0\u8594 ITM transition; sizing must hold the ZEBRA per-position budget within the capital-outlay allocation (see Position Sizing). Split-expiry overlays (put expiring before the parent ZEBRA) are NOT used going forward \'97 the matched-expiry held-to-OpEx geometry is what was validated.\
+\
+\'a0\'a0\'a0\b Managed-exit variants on the put (ALL REJECTED).\b0  Phase 2 tested five distinct exit criteria on the put leg \'97 close at T-30, T-21, T-14, at 50% gain, at 100% gain. All five variants underperformed held-to-OpEx by $2\'96$6/cycle with 0/4 walk-forward splits showing positive lift. The drag is concentrated in 2021-2023 and 2022-2024 (\'96$20 to \'96$31/cyc) \'97 exactly the windows where the put is supposed to pay off. The credit-spread T-21 discipline does NOT generalize to long-vol legs. Closing the put on any criterion forfeits the late-cycle gamma kick.\
+\
+\'a0\'a0\'a0\b Conditional-trigger variants (ALL REJECTED vs HOLD).\b0  Phase 2 tested three on-signal triggers \'97 C1 attach-on-drawdown (\'96$3.44 vs HOLD, 0/4), C2 attach-on-term-inversion (\'96$1.21 vs HOLD, 2/4, fires 85% so nearly always-on), C3 attach-on-breadth-divergence (NEVER FIRED in 13 years at the 2026-05-11 thresholds). C4 (30Y > 5%) data-blocked, not yet tested. The "always-on" baseline is structurally robust \'97 trying to gate the overlay on a signal costs more than the saved premium.\
+\
+\'a0\'a0\'a0Detail: project_zebra_overlay_phase2_complete.md.\
+\'95  \b Sizing.\b0  Capital-outlay-based, NOT per-contract. See Position Sizing section. Single AMZN/GOOGL contracts can carry $50K\'96$70K of capital outlay; SPY/QQQ contracts are roughly $7K\'96$10K each. Sizing must be aligned to book equity, not to a per-contract target. The overlay's cost is part of the per-position capital outlay and scales with the regime-conditional strike (deepest in Stage 4-5).\
+\'95  \b Execution.\b0  Open all four legs (2\'d7 long ITM call + 1\'d7 short ATM call + 1\'d7 long put per the regime rule) simultaneously on a single combo ticket where the broker supports it; otherwise the parent ZEBRA combo first, then the overlay leg as an immediate follow-on. Slip sensitivity is minimal (slip=0.25 vs 0.50 differs by <$0.05/share on cohort means).\
 \
 \b Symbols that respond well (TESTED)\b0\
 \
@@ -519,9 +532,9 @@ Cyclicals and commodity-flow names where the underlying did not sustain a direct
 \'95  \b Neutral.\b0  Sideways/flat regimes \'97 the zero-theta property protects the position from time bleed. Flat-day mean MTM change was +$0.58/day across the cohort \'97 sideways stocks slightly grow the position rather than shrink it.\
 \'95  \b Unfavorable.\b0  Sustained crash regimes \'97 ZEBRA absorbs full debit loss when spot expires below the long-call strikes. Defined-risk floor holds (max loss = debit), but the loss is real. In contrast to long stock the loss is capped at ~21% of equivalent share-purchase capital, but per-contract dollar damage on high-priced names (AMZN \'96$726, GOOGL \'96$654, TSLA \'96$565) is large \'97 sizing matters.\
 \
-\b Rolling (NOT YET TESTED)\b0\
+\b Rolling (RETIRED 2026-05-14)\b0\
 \
-\'95  Rolling a ZEBRA forward to the next monthly OpEx is an open question. The natural trigger would be DTE \uc0\u8804  21 (when long-call gamma starts decaying rapidly). Whether rolling captures the next 75-day gamma cycle without forfeiting the current gain is an empirical question the test did not address. Held-to-expiration is the only validated treatment.\
+\'95  Rolling a ZEBRA at T-21 to the next monthly OpEx is RETIRED under all circumstances. The 2026-05-03 T-21 ROLL CUE was an untested rule based on TastyTrade-canonical short-call-gamma-whip reasoning. The 2026-05-14 Phase 1 + Phase 2 backtests demonstrated that the same late-cycle gamma argument used to justify rolling early is precisely what the structure is built to capture: ALL 5 managed-exit variants on the put leg (M1\'96M4) underperformed hold-to-expiry by 0/4 walk-forward splits. The mechanism applies symmetrically to the parent ZEBRA. Held-to-OpEx for both legs is the validated mechanic; the daily alert no longer emits a ROLL CUE. Detail: project_zebra_t21_roll_rule.md (retirement notice + supersession reasoning).\
 \
 \b Expected outcomes (slip=0.50, 75-DTE held to expiry)\b0\
 \
@@ -541,7 +554,10 @@ The methodology generalizes: future Tier 2 (or Tier 1) additions follow the same
 \
 \b Pending investigations\b0\
 \
-\'95  Rolling at DTE\uc0\u8804 21 to next monthly OpEx \'97 captures the next gamma cycle?\
+\'95  Phase 2 overlay testing closed 2026-05-14. All managed-exit variants (M1\'96M4) and the three conditional-trigger variants with available data (C1\'96C3) tested and rejected vs HOLD baseline. Detail: project_zebra_overlay_phase2_complete.md.\
+\'95  \b C4 (30Y yield > 5% threshold) \'97 DATA BLOCKED.\b0  No local 30Y parquet; requires FRED / Agent_Project integration. Open question, captured for the post-June-OpEx watchlist.\
+\'95  \b Active-bear deepening qualifier on the Stage 4-5 ITM5 rule \'97 conceptually motivated, N=1 sample.\b0  The split between active-deepening bear (favors ITM5) and troughing/recovery bear (favors OTM10) was empirically clear in 2022-2024 but rests on one regime sample. Formal validation requires another bear regime to confirm; the rule should be applied conservatively in the meantime.\
+\'95  Rolling at DTE\uc0\u8804 21 to the next monthly OpEx for the parent ZEBRA \'97 captures the next gamma cycle? Daily alert surfaces a ROLL CUE for trader discretion but the mechanic is not validated.\
 \'95  Walk-forward on the bottom cohort to confirm the directional-bias-required interpretation \'97 if cyclical names show flat-out positive ZEBRA in a future bull regime, the exclusion list may need revisiting.\
 \'95  Whether ZEBRA on bull_put cohort names (e.g., MSFT, TJX, WMT) outperforms running bull_put on those names per-cycle on a capital-adjusted basis. Different sizing baselines make a direct comparison non-trivial.\
 \
@@ -789,6 +805,7 @@ Size by dollar risk (notional max loss), not by contract count. One SPX contract
 \
 \'95  \b Per underlying:\b0  total max loss across all positions on the same symbol <= 3% of account\
 \'95  \b Per cluster:\b0  total max loss in any single archetype cluster <= 40% of total book max loss\
+\'95  \b Per GICS sector:\b0  no more than 2 single-name positions in the same GICS sector per OpEx cycle (SHIPPED 2026-05-15). ETFs (broad-market or sector) are exempt \'97 they are already aggregate exposure. Enforced mechanically in the cycle qualifier: if more than 2 candidates qualify in the same sector for the same OpEx, rank by verdict tier (GO > DOWNSIZE) with alphabetical tiebreaker and keep the top 2; lower-ranked candidates receive a SKIP_CONCENTRATION verdict. Daily alert surfaces a \uc0\u8226  SECTOR-LOAD warning on the second entry per sector, even before the cap fires, so the second entry is a conscious decision rather than silent stacking. Triggered by the 2026-05-12 WFC + JPM same-cohort stop pattern: a correlation cluster is not two independent risk events. Detail memory: project_sector_concentration_cap.md.\
 \'95  \b SPX-specific:\b0  SPX max loss counts triple against the per-cluster cap \'97 a $3,000 SPX position consumes the same concentration budget as a $9,000 position in another cluster-2 name\
 \'95  \b Book-wide:\b0  total max loss across all open bull_put + bear_call positions <= 15% of account capital at any time\
 \

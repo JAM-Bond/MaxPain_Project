@@ -43,6 +43,7 @@ from lib.opex_calendar import (  # noqa: E402
 )
 from scripts.qualifier import gate_config as G  # noqa: E402
 from scripts.qualifier.earnings_calendar import upcoming_earnings  # noqa: E402
+from lib.sector_map import get_sector, is_cap_exempt, ETF_SENTINEL, UNKNOWN_SENTINEL  # noqa: E402
 
 log = logging.getLogger(__name__)
 
@@ -727,6 +728,79 @@ def format_verdicts(verdict_rows: list[dict]) -> str:
     return "\n".join(out_lines)
 
 
+# ─── Sector-concentration cap ─────────────────────────────────────────
+
+def apply_sector_concentration_cap(rows: list[dict]) -> list[dict]:
+    """Enforce max-N-single-names-per-GICS-sector-per-OpEx on GO/DOWNSIZE rows.
+
+    Triggered by the WFC + JPM same-cycle stop pattern on 2026-05-12.
+    Operates only on OpEx-anchored rows (earnings rows are not capped —
+    they're a different time bucket). ETFs and unmapped symbols are exempt.
+
+    Ranking within an over-concentrated sector:
+      1. Verdict tier: GO ranks above DOWNSIZE (qualifier-decided confidence)
+      2. Alphabetical tiebreaker (deterministic, no judgment)
+
+    Lower-ranked candidates get verdict downgraded to SKIP_CONCENTRATION with
+    sector_rank_position annotation (e.g. "3 of 4 in financials"). All rows
+    receive a `sector` field for audit.
+
+    Returns the list of rows (mutated in place; same order).
+    """
+    actionable_set = (G.VERDICT_GO, G.VERDICT_DOWNSIZE)
+    verdict_rank = {G.VERDICT_GO: 0, G.VERDICT_DOWNSIZE: 1}
+
+    # Stamp sector on every row for downstream audit. Earnings rows show
+    # opex="(earnings-anchored)" and are excluded from cap grouping below.
+    for r in rows:
+        r["sector"] = get_sector(r.get("symbol", ""))
+        r.setdefault("sector_rank_position", None)
+
+    # Group only OpEx-anchored, actionable, non-exempt rows
+    groups: dict[tuple, list[dict]] = {}
+    for r in rows:
+        if r.get("verdict") not in actionable_set:
+            continue
+        opex = r.get("opex")
+        if not opex or "earnings" in str(opex):
+            continue
+        if is_cap_exempt(r.get("symbol", "")):
+            continue
+        key = (opex, r["sector"])
+        groups.setdefault(key, []).append(r)
+
+    n_capped = 0
+    for (opex, sector), bucket in groups.items():
+        if len(bucket) <= G.SECTOR_CAP_MAX_PER_OPEX:
+            continue
+        # Rank: GO before DOWNSIZE; then alphabetical
+        ranked = sorted(
+            bucket,
+            key=lambda r: (verdict_rank.get(r["verdict"], 99), r["symbol"]),
+        )
+        total = len(ranked)
+        for idx, r in enumerate(ranked, start=1):
+            r["sector_rank_position"] = f"{idx} of {total} in {sector}"
+            if idx > G.SECTOR_CAP_MAX_PER_OPEX:
+                original_verdict = r["verdict"]
+                r["verdict"] = G.VERDICT_SKIP_CONCENTRATION
+                r["size"] = 0.0
+                cap_note = (
+                    f"sector cap fired ({sector}, {idx}/{total} rank); "
+                    f"original verdict={original_verdict}"
+                )
+                r["reason"] = (
+                    (r.get("reason") + " | " + cap_note) if r.get("reason")
+                    else cap_note
+                )
+                n_capped += 1
+
+    if n_capped:
+        log.info("Sector-concentration cap downgraded %d row(s) to SKIP_CONCENTRATION",
+                 n_capped)
+    return rows
+
+
 # ─── Persistence ──────────────────────────────────────────────────────
 
 QUALIFIER_COLUMNS = [
@@ -734,6 +808,7 @@ QUALIFIER_COLUMNS = [
     "target", "opex", "days_until",
     "verdict", "size", "reason",
     "regime_stage", "regime_h1", "regime_if_gate", "regime_bp_signal",
+    "sector", "sector_rank_position",
 ]
 
 
@@ -764,6 +839,11 @@ def write_qualifier_runs(rows: list[dict], regime: dict, run_date: date,
             PRIMARY KEY (run_date, symbol, structure, window)
         )
     """)
+    # Idempotent column adds for the sector-concentration cap (2026-05-15).
+    existing_cols = {r[1] for r in cur.execute("PRAGMA table_info(cycle_qualifier_runs)").fetchall()}
+    for col_name, col_type in [("sector", "TEXT"), ("sector_rank_position", "TEXT")]:
+        if col_name not in existing_cols:
+            cur.execute(f"ALTER TABLE cycle_qualifier_runs ADD COLUMN {col_name} {col_type}")
     placeholders = ", ".join(["?"] * len(QUALIFIER_COLUMNS))
     col_list = ", ".join(QUALIFIER_COLUMNS)
     rs = regime or {}
@@ -838,6 +918,10 @@ def main():
     )
     earnings_rows = build_earnings_verdicts(run_date, spots)
     verdict_rows = opex_rows + earnings_rows
+
+    # Sector-concentration cap (max 2 single names per GICS sector per OpEx).
+    # Runs after all per-structure verdicts so it sees the full candidate set.
+    verdict_rows = apply_sector_concentration_cap(verdict_rows)
 
     print()
     print("=" * 78)

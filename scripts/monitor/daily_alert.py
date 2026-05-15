@@ -464,22 +464,22 @@ def detect_dte_checkpoints(positions: pd.DataFrame, conn) -> list[str]:
                     f"🛡  {sym} {struct} {suffix}: "
                     f"T-{dte} — consider closing protective put for residual value"
                 )
-            # ZEBRA exit cadence — TastyTrade-canonical management at T-21,
-            # not held-to-expiry. The "Zero Extrinsic" property only holds
-            # at moderate DTE; past T-21, theta on the ATM short accelerates
-            # faster than on the ITM longs (breaking neutrality) and gamma
-            # sharpens around the short strike (whipping the position).
-            # The held-to-expiry rule was a backtest-mechanic, not a
-            # deployment instruction. Roll to the next 75-DTE expiration.
-            if 3 < dte <= 21:
+            # ZEBRA exit cadence — held to OpEx, no managed exit.
+            # Phase 1 + Phase 2 backtests (2026-05-14) validated held-to-
+            # expiration on both the parent ZEBRA and the long-put overlay;
+            # all 5 managed-exit variants on the put (M1-M4) underperformed
+            # HOLD by 0/4 walk-forward splits. The 2026-05-03 T-21 ROLL CUE
+            # was an untested TastyTrade-canonical rule that the 2026-05-14
+            # backtests effectively invalidated — late-cycle gamma is what
+            # the structure is built to capture, not avoid.
+            #
+            # Only fires near expiry for assignment-mechanics awareness; not
+            # a roll instruction.
+            if 0 < dte <= 3:
                 actionable.append(
-                    f"🔄 {sym} {struct} {suffix}: T-{dte} — ROLL CUE "
-                    f"(theta/gamma neutrality breaks past T-21; close + open next 75-DTE)"
-                )
-            elif 0 < dte <= 3:
-                actionable.append(
-                    f"⚠ {sym} {struct} {suffix}: T-{dte} — ROLL OVERDUE "
-                    f"(should have rolled at T-21; close before assignment risk)"
+                    f"⏰ {sym} {struct} {suffix}: T-{dte} — at expiry "
+                    f"(held-to-OpEx per validated rule; close manually if "
+                    f"you prefer to avoid short-call assignment mechanics)"
                 )
 
         elif struct in ("inverted_fly", "if_pair", "if_single"):
@@ -1143,7 +1143,7 @@ def build_construction_enrichment(conn) -> tuple[str, list[str]]:
         return "", []
 
     df = pd.read_sql_query(f"""
-        SELECT symbol, structure, target, opex, days_until, verdict, reason
+        SELECT symbol, structure, target, opex, days_until, verdict, reason, sector
         FROM cycle_qualifier_runs
         WHERE run_date = '{latest[0]}'
           AND verdict IN ('GO', 'DOWNSIZE')
@@ -1155,8 +1155,20 @@ def build_construction_enrichment(conn) -> tuple[str, list[str]]:
 
     # Lazy import — only when actionable rows exist (saves cron startup time)
     from scripts.monitor.trade_construction import (
-        build_construction_block, build_zebra_protected_block,
+        build_construction_block, build_zebra_with_overlay_block,
     )
+    from scripts.monitor.zebra_overlay_rule import regime_overlay_rule
+    from lib.sector_map import ETF_SENTINEL, UNKNOWN_SENTINEL
+
+    # Compute the overlay rule once per alert run — shared across all ZEBRA
+    # candidate cards. Avoids re-querying regime_state per symbol.
+    overlay_rule = None
+
+    # Track (opex, sector) → count of candidates rendered so we can flag
+    # the 2nd entry in a sector with ⚠ SECTOR-LOAD. The qualifier already
+    # caps the 3rd+ (SKIP_CONCENTRATION verdict not present in this query);
+    # this annotation surfaces the cap-adjacent state to the trader.
+    sector_count: dict[tuple[str, str], int] = {}
 
     text_parts = []
     html_parts = []
@@ -1166,24 +1178,49 @@ def build_construction_enrichment(conn) -> tuple[str, list[str]]:
         # treatment in a later phase.
         if not r["opex"] or "earnings" in r["opex"]:
             continue
+
+        # Increment + maybe-flag sector load
+        sector = r.get("sector") or UNKNOWN_SENTINEL
+        sector_warning = None
+        if sector not in (ETF_SENTINEL, UNKNOWN_SENTINEL, None):
+            key = (r["opex"], sector)
+            sector_count[key] = sector_count.get(key, 0) + 1
+            if sector_count[key] == 2:
+                sector_warning = (
+                    f"  ⚠ SECTOR-LOAD: 2nd {sector} entry for OpEx {r['opex']} "
+                    f"— at the per-sector cap (max {2} per GICS sector)"
+                )
+
         result = build_construction_block(r["symbol"], r["structure"], r["opex"])
         if not result["ok"]:
             text_parts.append(f"  ⚠ {r['symbol']} {r['structure']}: {result['error']}")
             continue
         text_parts.append(result["text"])
+        if sector_warning:
+            text_parts.append(sector_warning)
         text_parts.append("")
         html_parts.append(result["html"])
+        if sector_warning:
+            html_parts.append(
+                f"<div style='font-size:12px;color:#b58900;margin:4px 0 12px 0;"
+                f"padding:6px 10px;background:#fff8dc;border-left:3px solid #b58900'>"
+                f"{sector_warning.strip()}</div>"
+            )
 
-        # For ZEBRA rows, also render the zebra_protected variant so the user
-        # can compare base vs hedged side-by-side in the same alert.
+        # For ZEBRA rows, render the regime-conditional overlay variant.
+        # Phase 1+2 validated: matched-expiry long put, strike by regime,
+        # both legs held to OpEx. Replaces the legacy build_zebra_protected
+        # split-expiry construction.
         if r["structure"].startswith("zebra"):
-            prot = build_zebra_protected_block(r["symbol"], r["opex"])
-            if prot["ok"]:
-                text_parts.append(prot["text"])
+            if overlay_rule is None:
+                overlay_rule = regime_overlay_rule()
+            ovl = build_zebra_with_overlay_block(r["symbol"], r["opex"], overlay_rule)
+            if ovl["ok"]:
+                text_parts.append(ovl["text"])
                 text_parts.append("")
-                html_parts.append(prot["html"])
+                html_parts.append(ovl["html"])
             else:
-                text_parts.append(f"  ⚠ {r['symbol']} zebra_protected: {prot['error']}")
+                text_parts.append(f"  ⚠ {r['symbol']} zebra_overlay: {ovl['error']}")
 
     return "\n".join(text_parts), html_parts
 
