@@ -14,7 +14,7 @@ structure) verdicts: GO, DOWNSIZE, PENDING, SKIP, PAUSE, NOT_IN_COHORT.
 Design doc: project_cycle_qualifier_design.md memory.
 
 Persistence:
-  - cycle_qualifier_runs table in metal_project.db (one row per verdict)
+  - cycle_qualifier_runs table in maxpain.db (one row per verdict)
   - parquet artifact at data/qualifier/qualifier_<run_date>.parquet
   - human-readable console output
 
@@ -36,7 +36,7 @@ import pandas as pd
 import requests
 
 sys.path.insert(0, str(Path.home() / "MaxPain_Project"))
-sys.path.insert(0, str(Path.home() / "Metal_Project"))  # for Schwab.auth
+from lib.db import DB_PATH  # noqa: E402
 from lib.opex_calendar import (  # noqa: E402
     current_opex, next_n_opexes, trading_day_offset, trading_days_between,
     calendar_days_before,
@@ -48,7 +48,6 @@ from lib.sector_map import get_sector, is_cap_exempt, ETF_SENTINEL, UNKNOWN_SENT
 log = logging.getLogger(__name__)
 
 ROOT = Path.home() / "MaxPain_Project"
-DB_PATH = Path.home() / "Metal_Project/data/shared/metal_project.db"
 COHORT_PATH = ROOT / "data/profile/research_cohort_v15.parquet"
 QUALIFIER_DIR = ROOT / "data/qualifier"
 ORATS_BY_TICKER = ROOT / "data/orats/by_ticker"
@@ -329,6 +328,10 @@ def evaluate_opex_cell(symbol: str, structure: str, window_label: str,
         if not regime.get("h1_active"):
             gate_ok = False
             gate_reason = "bear_call H1 gate off (need SPY<200dma + IVR>0.5)"
+    elif structure == "anti_zebra":
+        if not regime.get("h1_active"):
+            gate_ok = False
+            gate_reason = "anti_zebra H1 gate off (need SPY<200dma + IVR>0.5)"
     elif structure in ("inverted_fly_pair", "inverted_fly_single"):
         if symbol in G.IF_NO_GATE_NAMES:
             pass  # GOOGL etc. skip the gate
@@ -513,6 +516,14 @@ def build_opex_verdicts(regime: dict, windows: dict, run_date: date,
         for sym in G.COHORT_ZEBRA_TIER2:
             rows.append(evaluate_opex_cell(
                 sym, "zebra_tier2", "75-DTE",
+                target, opex, days_until, regime, run_date, ed(sym), spots,
+            ))
+        # Anti-ZEBRA (bearish synthetic-short, H1-gated). Shares the 75-DTE
+        # window; H1 gate in evaluate_opex_cell filters when SPY isn't in
+        # the bear regime. Promoted 2026-05-17 per ANTI_ZEBRA_PREREG.md.
+        for sym in G.COHORT_ANTI_ZEBRA_TIER1:
+            rows.append(evaluate_opex_cell(
+                sym, "anti_zebra", "75-DTE (H1-gated)",
                 target, opex, days_until, regime, run_date, ed(sym), spots,
             ))
 
@@ -814,7 +825,7 @@ QUALIFIER_COLUMNS = [
 
 def write_qualifier_runs(rows: list[dict], regime: dict, run_date: date,
                          dry_run: bool = False) -> int:
-    """Persist verdict rows to cycle_qualifier_runs in metal_project.db."""
+    """Persist verdict rows to cycle_qualifier_runs in maxpain.db."""
     if not rows or dry_run:
         return 0
     conn = sqlite3.connect(DB_PATH)

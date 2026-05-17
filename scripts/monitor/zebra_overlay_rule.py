@@ -16,12 +16,15 @@ Reads from regime_state + regime_health_snapshots in the live DB.
 from __future__ import annotations
 
 import sqlite3
+import sys
 from pathlib import Path
 from datetime import date, timedelta
 
 import pandas as pd
 
-DB_PATH = Path.home() / "Metal_Project/data/shared/metal_project.db"
+sys.path.insert(0, str(Path.home() / "MaxPain_Project"))
+
+from lib.db import DB_PATH  # noqa: E402
 
 # Lookback constants (calendar days). The 60-day low + 30-day recency
 # match the rule in TRADING_PLAN.rtf ZEBRA section.

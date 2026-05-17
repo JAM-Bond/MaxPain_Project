@@ -1,19 +1,13 @@
 #!/bin/bash
 # =============================================================================
-# backup_db.sh — Daily SQLite backup for the shared metal_project.db
-# MaxPain Project · 2026-05-02
+# backup_db.sh — Daily SQLite backup for the MaxPain DB
+# MaxPain Project · 2026-05-02 (relocated/renamed 2026-05-17)
 #
 # Cron schedule (daily at 8:45 AM ET — before the 9:20 AM snapshot cron):
 #   45 8 * * 1-5 cd ~/MaxPain_Project && bash scripts/backup_db.sh >> logs/backup_cron.log 2>&1
 #
-# History: replaces ~/Metal_Project/scripts/backup_db.sh, which had a
-# broken ROOT path (../.. instead of ..) and had been silently failing
-# since at least 2026-04-20. New version explicitly hard-codes the DB
-# path because the DB is shared (DB lives under Metal_Project but is
-# being phased out as a project; renaming to maxpain.db is deferred).
-#
 # Logic:
-#   1. Copy metal_project.db to a dated backup file (sqlite3 .backup)
+#   1. Copy maxpain.db to a dated backup file (sqlite3 .backup)
 #   2. Verify the backup is valid (PRAGMA integrity_check + row sanity)
 #   3. ONLY if verification passes, delete backups older than KEEP_DAYS
 #   4. Log all steps with timestamps
@@ -22,11 +16,11 @@
 set -euo pipefail
 
 # ── Config ────────────────────────────────────────────────────────────────────
-DB_PATH="$HOME/Metal_Project/data/shared/metal_project.db"
-BACKUP_DIR="$HOME/Metal_Project/data/shared/backups"
+DB_PATH="$HOME/MaxPain_Project/data/shared/maxpain.db"
+BACKUP_DIR="$HOME/MaxPain_Project/data/shared/backups"
 KEEP_DAYS=7
 DATE=$(date +%Y%m%d)
-BACKUP_FILE="$BACKUP_DIR/metal_project_$DATE.db"
+BACKUP_FILE="$BACKUP_DIR/maxpain_$DATE.db"
 LOG_PREFIX="[$(date '+%Y-%m-%d %H:%M:%S')]"
 
 # ── Setup ─────────────────────────────────────────────────────────────────────
@@ -99,7 +93,7 @@ while IFS= read -r old_file; do
     rm "$old_file"
     echo "$LOG_PREFIX Deleted: $old_file"
     ((DELETED++)) || true
-done < <(find "$BACKUP_DIR" -name "metal_project_*.db" -mtime +$KEEP_DAYS)
+done < <(find "$BACKUP_DIR" -name "maxpain_*.db" -mtime +$KEEP_DAYS)
 
 if [ "$DELETED" -eq 0 ]; then
     echo "$LOG_PREFIX No old backups to prune."
@@ -108,6 +102,6 @@ else
 fi
 
 # ── Summary ───────────────────────────────────────────────────────────────────
-BACKUP_COUNT=$(find "$BACKUP_DIR" -name "metal_project_*.db" | wc -l | tr -d ' ')
+BACKUP_COUNT=$(find "$BACKUP_DIR" -name "maxpain_*.db" | wc -l | tr -d ' ')
 echo "$LOG_PREFIX Backup complete. $BACKUP_COUNT backup(s) retained in $BACKUP_DIR"
 echo "$LOG_PREFIX ── DB Backup End ────────────────────────────────"

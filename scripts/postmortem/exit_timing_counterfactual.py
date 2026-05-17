@@ -30,13 +30,16 @@ from __future__ import annotations
 
 import argparse
 import sqlite3
+import sys
 from datetime import date, datetime
 from pathlib import Path
 
 import pandas as pd
 import yfinance as yf
 
-DB_PATH = Path.home() / "Metal_Project/data/shared/metal_project.db"
+sys.path.insert(0, str(Path.home() / "MaxPain_Project"))
+
+from lib.db import DB_PATH  # noqa: E402
 
 
 def _intrinsic_at_spot(spread_type: str, short_k: float, long_k: float, spot: float) -> float:

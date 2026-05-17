@@ -4,7 +4,7 @@ For each ticker in the v1.5 research cohort (+ any extra names with open
 positions), compute percentiles of daily absolute return from ORATS history.
 Store results in alert_thresholds table. Refresh quarterly or on cohort change.
 
-Output table schema (alert_thresholds in metal_project.db):
+Output table schema (alert_thresholds in maxpain.db):
   ticker, n_days, p75, p90, p95, p99, refreshed_at
 
 Usage:
@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sqlite3
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -24,7 +25,9 @@ import pandas as pd
 ROOT = Path.home() / "MaxPain_Project"
 BY_TICKER = ROOT / "data/orats/by_ticker"
 COHORT_PATH = ROOT / "data/profile/research_cohort_v15.parquet"
-DB_PATH = Path.home() / "Metal_Project/data/shared/metal_project.db"
+sys.path.insert(0, str(ROOT))
+
+from lib.db import DB_PATH  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("alert_thresh")
@@ -82,9 +85,9 @@ def main():
     cohort = pd.read_parquet(COHORT_PATH)["ticker"].tolist()
     # Always include SPY/VIX for regime context
     base = set(cohort + ["SPY", "QQQ", "VIX"])
-    # Pull in any tickers with currently-open positions in either Metal_Project
-    # trade_log or spread_score_trades (so the alert has thresholds for live
-    # paper book even when those names aren't in the v1.5 cohort).
+    # Pull in any tickers with currently-open positions in either trade_log
+    # or spread_score_trades (so the alert has thresholds for live paper book
+    # even when those names aren't in the v1.5 cohort).
     conn = sqlite3.connect(DB_PATH)
     open_syms = set()
     for tbl, where in [("trade_log", "exit_date IS NULL OR exit_price IS NULL"),

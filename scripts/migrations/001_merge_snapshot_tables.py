@@ -43,9 +43,12 @@ from __future__ import annotations
 
 import argparse
 import sqlite3
+import sys
 from pathlib import Path
 
-DB = Path.home() / "Metal_Project/data/shared/metal_project.db"
+sys.path.insert(0, str(Path.home() / "MaxPain_Project"))
+
+from lib.db import DB_PATH as DB  # noqa: E402
 
 CREATE_SQL = """
 CREATE TABLE IF NOT EXISTS live_snapshots (

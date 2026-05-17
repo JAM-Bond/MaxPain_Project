@@ -25,18 +25,17 @@ from typing import Optional
 import pandas as pd
 
 ROOT = Path.home() / "MaxPain_Project"
-METAL_ROOT = Path.home() / "Metal_Project"
 BACKTEST_DIR = ROOT / "scripts/backtest"
 sys.path.insert(0, str(ROOT))
-sys.path.insert(0, str(METAL_ROOT))
 sys.path.insert(0, str(BACKTEST_DIR))
 
+from lib.db import DB_PATH  # noqa: E402
 from lib.schwab_options import fetch_chain_with_greeks  # noqa: E402
 from lib.opex_calendar import third_friday  # noqa: E402
 from scripts.monitor.moneyness_lookup import recommended_short_delta, recommended_if_wing  # noqa: E402
 from scripts.qualifier import gate_config as G  # noqa: E402
 from structures import (  # noqa: E402
-    open_zebra, open_inverted_fly, open_bull_put, open_bear_call,
+    open_zebra, open_anti_zebra, open_inverted_fly, open_bull_put, open_bear_call,
     open_bull_put_mp,
 )
 import config as _bt_config  # noqa: E402
@@ -59,6 +58,7 @@ _bt_config.activate_v2()  # PRICING_MODE = "mid"
 STRUCTURE_TO_OPENER = {
     "zebra_tier1": open_zebra,
     "zebra_tier2": open_zebra,
+    "anti_zebra": open_anti_zebra,
     "inverted_fly_pair": open_inverted_fly,
     "inverted_fly_single": open_inverted_fly,
     "inverted_fly_earnings": open_inverted_fly,
@@ -74,9 +74,8 @@ STRUCTURE_TO_OPENER = {
 def _load_max_pain(symbol: str, expiry: str) -> Optional[float]:
     """Latest max_pain from live_snapshots for (symbol, opex_date=expiry)."""
     import sqlite3
-    db_path = Path.home() / "Metal_Project/data/shared/metal_project.db"
     try:
-        with sqlite3.connect(str(db_path)) as conn:
+        with sqlite3.connect(str(DB_PATH)) as conn:
             row = conn.execute(
                 "SELECT max_pain FROM live_snapshots "
                 "WHERE symbol = ? AND opex_date = ? AND max_pain IS NOT NULL "
@@ -178,6 +177,53 @@ def _zebra_metrics(pos, chain=None) -> dict:
             ("Extrinsic cushion", f"${n['extrinsic_cushion']:+.2f} ({'PASS' if n['extrinsic_cushion'] >= 0 else 'FAIL'})"),
         ] + range_block,
         "sizing": "Capital outlay = 5–10% of book equity per ZEBRA position.",
+        "liquidity_warning": liq_warn,
+    }
+
+
+def _anti_zebra_metrics(pos, chain=None) -> dict:
+    """Anti-ZEBRA: 2x long ITM put + 1x short ATM put. Bearish synthetic-short."""
+    n = pos.notes
+    long_leg = pos.legs[0]
+    short_leg = pos.legs[2]
+    debit = n["debit"]
+
+    long_bid, long_ask = _leg_bidask(chain, long_leg) if chain is not None else (0.0, 0.0)
+    short_bid, short_ask = _leg_bidask(chain, short_leg) if chain is not None else (0.0, 0.0)
+
+    natural_debit = (2 * long_ask) - short_bid if long_ask and short_bid else None
+    limit_debit = debit - _LIMIT_SLIP_DEBIT
+
+    range_block = []
+    if natural_debit is not None:
+        range_block = [
+            ("─── Tradeable range ───", ""),
+            ("Mid debit (theoretical)", f"${debit:.2f}"),
+            ("Recommended limit DEBIT", f"≤ ${limit_debit:.2f}  (mid − ${_LIMIT_SLIP_DEBIT:.2f} — patient buyer)"),
+            ("Natural worst (ask×2 − bid)", f"${natural_debit:.2f}  ← walk away above this"),
+        ]
+    legs_ba = [(long_bid, long_leg.price, long_ask),
+               (short_bid, short_leg.price, short_ask)]
+    liq_warn = _liquidity_flag(legs_ba)
+
+    # NOTE: open_anti_zebra stores put-delta directly in leg.delta (already
+    # converted from ORATS call-delta convention). Display raw to avoid the
+    # double-conversion that _display_delta would do.
+    return {
+        "structure_label": "Anti-ZEBRA (bearish synthetic short — H1-gated)",
+        "rows": [
+            ("Long  put   ITM",  "+2", long_leg.strike, long_leg.delta, long_bid, long_leg.price, long_ask),
+            ("Short put   ATM",  "-1", short_leg.strike, short_leg.delta, short_bid, short_leg.price, short_ask),
+        ],
+        "summary": [
+            ("Net debit (per anti-ZEBRA)", f"${debit:.2f}"),
+            ("Capital outlay / contract", f"${debit*100:.0f}"),
+            ("Capital efficiency", f"{n['capital_efficiency']*100:.1f}% of stock cost"),
+            ("Max loss (defined risk)", f"${debit*100:.0f} — only if spot > ${long_leg.strike:.2f} at expiry"),
+            ("Net entry delta", f"{n['entry_delta']:+.2f} (≈ short-stock-equiv + gamma kicker)"),
+            ("Extrinsic cushion", f"${n['extrinsic_cushion']:+.2f} ({'PASS' if n['extrinsic_cushion'] >= 0 else 'FAIL'})"),
+        ] + range_block,
+        "sizing": "Capital outlay = 5–10% of book equity per anti-ZEBRA. H1 gate must be active.",
         "liquidity_warning": liq_warn,
     }
 
@@ -310,6 +356,8 @@ def _vertical_metrics(pos, kind: str, chain=None) -> dict:
 
 
 def _metrics_for(pos, structure: str, chain=None) -> dict:
+    if structure == "anti_zebra":
+        return _anti_zebra_metrics(pos, chain)
     if structure.startswith("zebra"):
         return _zebra_metrics(pos, chain)
     if structure.startswith("inverted_fly"):

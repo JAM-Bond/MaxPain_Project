@@ -3,10 +3,10 @@
 MaxPain research cohort daily snapshot
 ~/MaxPain_Project/scripts/pipeline/research_cohort_snapshot.py
 
-Captures the same summary metrics that the prior Metal_Project 9:15 ET
+Captures the same summary metrics that the prior 9:15 ET
 yfinance snapshot did, but pulled live from Schwab and scoped to the
 deployable cohort union from scripts/qualifier/gate_config.py. Writes to
-the unified `live_snapshots` table in metal_project.db (since 2026-05-02;
+the unified `live_snapshots` table in maxpain.db (since 2026-05-02;
 formerly `research_cohort_snapshots`).
 
 Cohort source: union of every COHORT_* list in gate_config.py. Adding a
@@ -35,14 +35,11 @@ from pathlib import Path
 
 import pandas as pd
 
-# v1.7+ — import from MaxPain shared lib (Tranche 1 migration). The Schwab
-# auth dependency still routes to Metal_Project at the lib level; that
-# stateful piece is deferred to a later tranche.
 sys.path.insert(0, str(Path.home() / "MaxPain_Project"))
-from lib.snapshot import take_snapshot, current_opex
+from lib.db import DB_PATH  # noqa: E402
+from lib.snapshot import take_snapshot, current_opex  # noqa: E402
 
 ROOT = Path.home() / "MaxPain_Project"
-DB_PATH = Path.home() / "Metal_Project/data/shared/metal_project.db"
 
 # SPX-side index requires a different Schwab endpoint; skip in equity-chain capture
 SKIP = {"SPX"}

@@ -71,6 +71,47 @@ COHORT_ZEBRA_TIER2 = [
     "CMG", "SCHW", "CSCO", "TTD", "USB",
 ]
 
+# Per-name overlay AUTO-attach cohort.
+# Names where the V3 (10% OTM put) overlay showed positive cohort-level lift
+# and walk-forward stability in its tier's backtest. Auto-attaching the
+# overlay at ZEBRA entry is mechanically defensible for these names; for
+# all other ZEBRA-cohort names the overlay remains a trader-discretion choice
+# (the regime-conditional strike rule in zebra_overlay_rule.py still applies
+# when invoked, but is not automatic).
+#
+# Sources:
+#   - NVDA/AMZN/GOOGL: project_zebra_put_overlay_phase1_findings.md (tier-1 PASS)
+#   - CMG/TTD:          project_zebra_overlay_tier2_findings.md (tier-2 per-name)
+#
+# CMG carries an explicit caveat: its +$63/cyc lift is concentrated in the
+# 2024 Niccol-departure drawdown. TTD is the cleaner per-period distribution.
+COHORT_ZEBRA_OVERLAY_AUTO = [
+    "NVDA", "AMZN", "GOOGL",   # tier-1, Phase 1 validated
+    "CMG", "TTD",              # tier-2, 2026-05-17 validated (CMG concentrated, TTD distributed)
+]
+
+# Anti-ZEBRA tier-1 cohort. Bearish synthetic-short structure (buy 2x ITM put
+# + sell 1x ATM put). REGIME-GATED — only deployable when H1 is active
+# (SPY below 200dma AND IVR_252 > 0.5). Names below passed Phase 2 per-name
+# walk-forward criteria; cohort-wide gate failed (only 2/4 walk-forward
+# splits positive due to H1 fire-period clustering, not 4 independent samples).
+#
+# Source: project_anti_zebra_phase2_findings.md + docs/ANTI_ZEBRA_PREREG.md
+#
+# Per-name caveats:
+#   GOOGL — CONCENTRATED 2022 (96% of P/L from one bear); big magnitude when fires
+#   AMZN  — CONCENTRATED 2022 (94% of P/L from one bear); big magnitude when fires
+#   META  — CONCENTRATED 2022 + THIN N=4 (only the 2022 bear sample exists)
+#   CNC   — distributed across 2018/2022/2025 H1 fires; small magnitude (+$12/share)
+#   CLF   — distributed across 4 H1 fire periods; very small magnitude (+$0.88/share)
+#
+# Long-call overlay was tested in Phase 2 and REJECTED (cohort drawdown
+# worsened, walk-forward 2/4). No COHORT_ANTI_ZEBRA_OVERLAY_AUTO list.
+COHORT_ANTI_ZEBRA_TIER1 = [
+    "GOOGL", "AMZN", "META",   # large-magnitude, 2022-concentrated
+    "CNC", "CLF",              # distributed, small-magnitude
+]
+
 # Earnings — promoted in v1.6
 COHORT_EARNINGS_BULL_PUT = [
     "GOOGL", "NUE", "META", "KO", "WFC", "RRC", "SCCO", "CNQ",

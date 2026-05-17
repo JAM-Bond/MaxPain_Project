@@ -30,9 +30,9 @@ from pathlib import Path
 from typing import Optional
 
 ROOT = Path.home() / "MaxPain_Project"
-METAL_DB = Path.home() / "Metal_Project/data/shared/metal_project.db"
 sys.path.insert(0, str(ROOT))
 
+from lib.db import DB_PATH as METAL_DB  # noqa: E402
 from lib.schwab_options import fetch_chain_with_greeks  # noqa: E402
 
 # Mirror the construction-block patient-trader heuristics. Always sit on the

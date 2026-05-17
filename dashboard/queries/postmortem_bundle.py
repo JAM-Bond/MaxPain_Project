@@ -15,9 +15,10 @@ from pathlib import Path
 import pandas as pd
 
 ROOT = Path.home() / "MaxPain_Project"
-DB_PATH = Path.home() / "Metal_Project/data/shared/metal_project.db"
 PROFILE_DIR = ROOT / "data" / "profile"
 sys.path.insert(0, str(ROOT))
+
+from lib.db import DB_PATH  # noqa: E402
 
 
 def _conn():

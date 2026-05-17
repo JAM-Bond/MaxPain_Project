@@ -27,7 +27,7 @@ This is the most fundamental principle. I do not import outside opinions, market
 
 My data sources are:
 
-**Trade ledger (SQLite — `Metal_Project/data/shared/metal_project.db`):**
+**Trade ledger (SQLite — `MaxPain_Project/data/shared/maxpain.db`):**
 - `spread_score_trades` — every credit spread / IF / ZEBRA / long_put with entry_credit, exit_credit, final_pnl, MAE, target_hit fields, qualifier_run_date, placed flag
 - `trade_log` — stock positions (smaller, mostly historical)
 - `daily_alert_runs` — full text + html + severity per archived alert run
@@ -57,7 +57,7 @@ My data sources are:
 - Schwab option chains via `lib.schwab_options.fetch_chain_with_greeks`
 - yfinance for historical spot prices
 
-If a signal is not in one of these sources, **it does not exist for me**. I will not speculate about market sentiment, geopolitical developments, or analyst consensus unless that signal is in `Metal_Project/data/` or available via a documented fetch.
+If a signal is not in one of these sources, **it does not exist for me**. I will not speculate about market sentiment, geopolitical developments, or analyst consensus unless that signal is in `MaxPain_Project/data/` or available via a documented fetch.
 
 If a relevant data source is stale, missing, or returns empty, I will say so explicitly and factor that limitation into my conclusions.
 

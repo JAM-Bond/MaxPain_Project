@@ -19,14 +19,13 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 st.set_page_config(page_title="Analytics — MaxPain", layout="wide", initial_sidebar_state="expanded")
 
 from components.style import inject_css, sidebar_banner, page_header, info_box, section_header  # noqa: E402
+from lib.db import DB_PATH  # noqa: E402
 from lib.trade_ledger import load_trade_ledger  # noqa: E402
 from lib.trade_analytics import (  # noqa: E402
     exit_type_breakdown, per_name_x_structure, qualifier_vs_off_script,
     structure_x_regime, mae_vs_final, regime_transition,
     sizing_audit, earnings_overlap,
 )
-
-DB_PATH = Path.home() / "Metal_Project/data/shared/metal_project.db"
 
 
 _ADEQUACY_EMOJI = {

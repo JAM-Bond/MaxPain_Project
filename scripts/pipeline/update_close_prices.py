@@ -34,6 +34,7 @@ from datetime import date
 from pathlib import Path
 
 sys.path.insert(0, str(Path.home() / "MaxPain_Project"))
+from lib.db import DB_PATH  # noqa: E402
 from lib.schwab_quotes import fetch_quotes  # noqa: E402
 
 try:
@@ -42,7 +43,6 @@ except ImportError:
     yf = None
 
 ROOT = Path.home() / "MaxPain_Project"
-DB_PATH = Path.home() / "Metal_Project/data/shared/metal_project.db"
 
 # SPX excluded — Schwab equity-quote endpoint doesn't handle index tickers
 SKIP = {"SPX"}

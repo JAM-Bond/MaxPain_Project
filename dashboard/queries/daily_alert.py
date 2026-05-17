@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 import sqlite3
+import sys
 from pathlib import Path
 
 import pandas as pd
 
-DB_PATH = Path.home() / "Metal_Project/data/shared/metal_project.db"
+sys.path.insert(0, str(Path.home() / "MaxPain_Project"))
+
+from lib.db import DB_PATH  # noqa: E402
 
 
 def _conn():

@@ -36,8 +36,8 @@ import pandas as pd
 
 ROOT = Path.home() / "MaxPain_Project"
 sys.path.insert(0, str(ROOT))
-DB_PATH = Path.home() / "Metal_Project/data/shared/metal_project.db"
 
+from lib.db import DB_PATH  # noqa: E402
 from lib.trade_ledger import load_trade_ledger, adequacy_flag  # noqa: E402
 
 

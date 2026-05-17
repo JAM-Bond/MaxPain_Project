@@ -22,12 +22,13 @@ import numpy as np
 import pandas as pd
 
 ROOT = Path.home() / "MaxPain_Project"
-DB_PATH = Path.home() / "Metal_Project/data/shared/metal_project.db"
 SPY_PATH = ROOT / "data/orats/by_ticker/SPY.parquet"
 VRP_OUT = ROOT / "data/profile/vrp_series.parquet"
 ATM_OUT = ROOT / "data/profile/atm_iv_series.parquet"
 
+sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "scripts/pipeline"))
+from lib.db import DB_PATH  # noqa: E402
 from research_cohort_snapshot import REGIME_COLUMNS  # noqa: E402
 
 

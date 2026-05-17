@@ -1,9 +1,8 @@
 """
 SMTP alert sender for MaxPain — supports plain-text and HTML bodies.
 
-Lifted from Metal_Project/scripts/pipeline/cron_alert.py with multipart
-HTML extension. Reads SMTP credentials from MaxPain_Project/config/api_keys.env
-(decoupled from Metal_Project 2026-05-04).
+Supports plain-text and multipart HTML bodies. Reads SMTP credentials
+from MaxPain_Project/config/api_keys.env.
 
 Usage:
     from lib.email_alert import send_html_alert

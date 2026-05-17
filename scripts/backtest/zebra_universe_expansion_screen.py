@@ -33,9 +33,7 @@ import pandas as pd
 import requests
 
 ROOT = Path.home() / "MaxPain_Project"
-METAL_ROOT = Path.home() / "Metal_Project"
 sys.path.insert(0, str(ROOT))
-sys.path.insert(0, str(METAL_ROOT))  # for Schwab.auth
 
 from scripts.qualifier.earnings_calendar import upcoming_earnings  # noqa: E402
 
@@ -136,7 +134,6 @@ def screen_orats_layer(ticker: str, spot: float) -> dict | None:
 def fetch_schwab_quotes(symbols: list[str]) -> dict[str, float]:
     """Bulk live quote fetch from Schwab /marketdata/v1/quotes.
     Returns {symbol: lastPrice}. Empty dict on auth failure.
-    Mirrors Metal_Project/scripts/pipeline/update_close_prices.py:39.
     """
     try:
         from Schwab.auth import get_valid_token
@@ -306,7 +303,7 @@ def main():
     spots = fetch_schwab_quotes(candidates)
     log.info("Schwab quotes: %d/%d returned", len(spots), len(candidates))
     if not spots:
-        log.error("Schwab quote fetch failed — aborting. Re-auth: `python3.11 Schwab/auth.py --force-reauth` from Metal_Project")
+        log.error("Schwab quote fetch failed — aborting. Re-auth: `python3.11 ~/MaxPain_Project/Schwab/auth.py --force-reauth`")
         return
 
     # ── Layer 1: ORATS gates (coverage + strike density centered on LIVE spot) ──

@@ -21,10 +21,11 @@ from pathlib import Path
 import pandas as pd
 
 ROOT = Path.home() / "MaxPain_Project"
-DB_PATH = Path.home() / "Metal_Project/data/shared/metal_project.db"
 COHORT_PARQUET = ROOT / "data/profile/research_cohort_v15.parquet"
 
+sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "scripts"))
+from lib.db import DB_PATH  # noqa: E402
 from qualifier.earnings_calendar import load_earnings_calendar  # noqa: E402
 
 

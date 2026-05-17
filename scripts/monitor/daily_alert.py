@@ -3,8 +3,7 @@
 MaxPain v1.7 daily alert
 ~/MaxPain_Project/scripts/monitor/daily_alert.py
 
-Two-section alert that replaces the granular-greek noise of the old
-Metal_Project daily_alert.py:
+Two-section alert:
 
   1. REGIME — fires on day-over-day changes in the regime_state table:
      stage transitions, H1 fires, signal flips (200dma cross, IVR cross,
@@ -38,12 +37,13 @@ from pathlib import Path
 import pandas as pd
 
 ROOT = Path.home() / "MaxPain_Project"
-DB_PATH = Path.home() / "Metal_Project/data/shared/metal_project.db"
 BY_TICKER = ROOT / "data/orats/by_ticker"
 EARNINGS_CACHE = ROOT / "data/profile/earnings_calendar_cache.parquet"
 
 # Enrichment imports (lazy: only on construction blocks path)
 sys.path.insert(0, str(ROOT))
+
+from lib.db import DB_PATH  # noqa: E402
 
 logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(message)s")
 log = logging.getLogger("alert")
@@ -1354,6 +1354,19 @@ def main():
         print(f"  {'-'*68}")
         for ev in approach_events:
             print(f"  ⓘ {ev}")
+
+    # Daily Macro Brief (reads Agent_Project ChromaDB — curve / FedWatch /
+    # Fed RSS). Soft-fail: never break the alert pipeline if Agent_Project
+    # is unavailable or its scrapers haven't run yet.
+    try:
+        from lib.macro_brief import build_macro_brief, render_text as render_brief_text
+        brief = build_macro_brief()
+        brief_text = render_brief_text(brief)
+        if brief_text.strip():
+            for line in brief_text.split("\n"):
+                print(line)
+    except Exception as e:
+        print(f"\n  MACRO BRIEF — unavailable ({e.__class__.__name__}: {e})")
 
     # Open-trade section
     print("\n  OPEN TRADES")

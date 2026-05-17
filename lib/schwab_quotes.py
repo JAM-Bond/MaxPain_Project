@@ -10,7 +10,7 @@ Schwab /marketdata/v1/quotes returns one call for many symbols. After
 4:00 PM ET, lastPrice = today's closing trade. closePrice is the prior
 session — don't use it for "today's close."
 
-Auth import still routes through Metal_Project (deferred per Tranche 4).
+Auth lives in this project as of 2026-05-15 (Schwab Tranche complete).
 """
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ from pathlib import Path
 
 import requests
 
-sys.path.insert(0, str(Path.home() / "Metal_Project"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from Schwab.auth import get_valid_token  # noqa: E402
 
 QUOTES_URL = "https://api.schwabapi.com/marketdata/v1/quotes"

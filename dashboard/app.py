@@ -3,7 +3,7 @@
 Visual style: GitHub dark + IBM Plex (matches Agent_Project 8501).
 Run: streamlit run dashboard/app.py --server.port 8502
 
-Read-only against ~/Metal_Project/data/shared/metal_project.db.
+Read-only against ~/MaxPain_Project/data/shared/maxpain.db.
 """
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ inject_css()
 sidebar_banner()
 st.sidebar.markdown(
     "<div style='font-family:IBM Plex Mono,monospace;font-size:0.7rem;color:#adbac7;"
-    "padding:0 0.5rem'>Read-only against<br/><code>metal_project.db</code></div>",
+    "padding:0 0.5rem'>Read-only against<br/><code>maxpain.db</code></div>",
     unsafe_allow_html=True,
 )
 

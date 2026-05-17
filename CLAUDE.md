@@ -4,30 +4,34 @@ Context for Claude Code working in this directory.
 
 ## What this is
 
-The future home of the max pain trading system. **Scaffold only** as of 2026-04-17. Being gradually populated as the Metal_Project audit (see `~/Metal_Project/AUDIT.md`) progresses through the May–June 2026 bake-off.
+The active home of the max pain trading system (v2.4+). Live infrastructure: 9:20/9:25/4:16/4:20/4:25/4:45 ET crons, the 8503 Streamlit dashboard (`com.maxpain.dashboard` launchd), the daily alert + cycle qualifier + post-mortem stack, the trade ledger, and the AI advisor. Paper-test window through ~2026-08-19, then live.
 
-## What lives here now
+`~/Metal_Project/` is being deleted. The DB, Schwab/auth module, and config have all been ported (2026-05-15→05-17). Acceptance-test wait period is in progress before final delete — see auto-memory `project_post_dbmove_observation_window.md`.
 
-- `dashboard/` — new 8503 head-to-head Streamlit viewer (in development). Reads the live DB at `~/Metal_Project/data/shared/metal_project.db`. Does not write.
-- `notebooks/` — empty. Scratch space for audit analyses.
-- `docs/` — planning docs only.
+## Key paths
+
+- **DB:** `~/MaxPain_Project/data/shared/maxpain.db` — single source of truth via `lib/db.py:DB_PATH`. Never hardcode the path in new code; always `from lib.db import DB_PATH`.
+- **Trading plan:** `docs/TRADING_PLAN.rtf` (canonical mechanics + gates; no per-name cohort lists — those live in `scripts/qualifier/gate_config.py`)
+- **Backups:** `data/shared/backups/` (rolling 7-day, via `scripts/backup_db.sh` daily 8:45 ET cron)
+- **Schwab auth:** `Schwab/auth.py` + `config/api_keys.env` (file-locked refresh, ported 5/15)
+- **Python:** `/opt/homebrew/bin/python3.11` (has pandas, yfinance, anthropic SDK)
+
+## Conventions
+
+- Cron jobs all `cd ~/MaxPain_Project` first, then run module-style or script-style. Most use `sys.path.insert(0, str(Path.home() / "MaxPain_Project"))` followed by `from lib.X import Y  # noqa: E402`.
+- Imports from `lib/` are always absolute (`from lib.db import DB_PATH`), never relative — except inside `lib/` itself where intra-package relative imports are fine (`from .db import DB_PATH`).
+- Backtest results live as parquet under `data/profile/`. DB tables are operational (live state); parquet artifacts are research evidence (frozen).
+- Trade closes: the user reports close → UPDATE `spread_score_trades` via SELECT-confirm-UPDATE pattern. Stock rows use `spread_type='stock'` with 0-sentinel for strike fields.
+
+## What NOT to do
+
+- Don't hardcode the DB path — always import from `lib/db.py`.
+- Don't add new code that imports from `~/Metal_Project/` anything.
+- Don't add per-name cohort decisions to `TRADING_PLAN.rtf` — those go in `gate_config.py`.
+- Don't reactivate the disabled Metal cron entries (already deleted from crontab 2026-05-17).
 
 ## Authoritative references
 
-**This project does NOT yet have its own SYSTEM_GUIDE or CLAUDE-style full context.** For anything touching trading logic, data pipelines, symbols, or audit decisions, consult:
-
-- `~/Metal_Project/SYSTEM_GUIDE.md` — v7.6, full system reference (~1500 lines)
-- `~/Metal_Project/CLAUDE.md` — project-wide instructions, scripts map, never-do list
-- `~/Metal_Project/AUDIT.md` — tiered scorecard of features; guides what migrates here
-
-## Rules while this is a scaffold
-
-1. **Do not copy Metal_Project code here yet.** Migration happens after May post-mortem, informed by AUDIT.md verdicts.
-2. **Do not duplicate the DB.** The dashboard reads from `~/Metal_Project/data/shared/metal_project.db` during the bake-off. No local DB file.
-3. **Do not register the 8503 launchd agent** until the dashboard has something to show. Plist lives in `dashboard/launchd/` as a template only.
-4. **Do not move or touch any cron jobs.** 4:15 / 4:20 / 4:30 / 4:45 PM ET crons all point at `~/Metal_Project/` — they stay until merge.
-5. **Do not rename the DB.** `metal_project.db` → `maxpain.db` happens at merge, not before.
-
-## First work expected here
-
-The 8503 head-to-head viewer comparing spread_evaluator (original Metal book) vs spread_score_tracker (independent line). See `docs/MERGE_PLAN.md` and AUDIT.md's UI section.
+- Trading plan: `docs/TRADING_PLAN.rtf`
+- Soul / AI advisor anchor: `config/SOUL.md`
+- Auto-memory index: `~/.claude/projects/-Users-josephmorris/memory/MEMORY.md` (loaded automatically)

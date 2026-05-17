@@ -8,14 +8,15 @@ Hypothesis: bond market is the smarter pricer. SPY rallies that get
 stay stagnant or fall are suspect.
 
 Data:
-  - SPY daily closes from ORATS (2013-01-02 to 2026-04-21)
-  - DGS10 (10-Year Treasury) from FRED API (full range)
+  - SPY daily closes from ORATS (2013-01-02 to current)
+  - DGS10 / DGS2 from Agent_Project ChromaDB (fred_historical_data
+    collection, 2021-03-12 onward). Pre-2021 dates fall back to direct
+    FRED API to fill the gap — this is a one-time backfill window and
+    does not run on daily/recent invocations.
 
 Outputs:
   - data/profile/spy_yield_aligned.parquet (one row per trading day)
   - terminal report: cross-correlation function, conditional validation rates
-
-Reuses Agent_Project's FRED API key from config/api_keys.env.
 """
 from __future__ import annotations
 
@@ -29,8 +30,11 @@ import requests
 ROOT = Path.home() / "MaxPain_Project"
 SPY_PARQUET = ROOT / "data/orats/by_ticker/SPY.parquet"
 OUT_PARQUET = ROOT / "data/profile/spy_yield_aligned.parquet"
-FRED_ENV = Path.home() / "Agent_Project/config/api_keys.env"
+AGENT_ROOT = Path.home() / "Agent_Project"
+FRED_ENV = AGENT_ROOT / "config/api_keys.env"
 FRED_BASE = "https://api.stlouisfed.org/fred/series/observations"
+
+sys.path.insert(0, str(AGENT_ROOT))
 
 
 def load_fred_key() -> str:
@@ -40,20 +44,70 @@ def load_fred_key() -> str:
     raise SystemExit("FRED_API_KEY not found in Agent_Project env")
 
 
-def fetch_fred_series(series_id: str, api_key: str,
-                     start: str = "2013-01-01") -> pd.DataFrame:
-    r = requests.get(FRED_BASE, params={
+def _fred_api_fetch(series_id: str, start: str, end: str | None = None) -> pd.DataFrame:
+    """Direct FRED API call. Reserved for pre-ChromaDB history backfill."""
+    api_key = load_fred_key()
+    params = {
         "series_id": series_id, "api_key": api_key, "file_type": "json",
         "observation_start": start,
-    }, timeout=30)
+    }
+    if end:
+        params["observation_end"] = end
+    r = requests.get(FRED_BASE, params=params, timeout=30)
     r.raise_for_status()
     obs = r.json()["observations"]
     df = pd.DataFrame(obs)
+    if df.empty:
+        return pd.DataFrame(columns=["date", series_id])
     df["date"] = pd.to_datetime(df["date"])
     df["value"] = pd.to_numeric(df["value"], errors="coerce")
     df = df.dropna(subset=["value"])[["date", "value"]]
-    df = df.rename(columns={"value": series_id})
-    return df
+    return df.rename(columns={"value": series_id})
+
+
+def _chromadb_fetch(series_id: str) -> pd.DataFrame:
+    """Read a FRED series from Agent_Project's ChromaDB.
+
+    Returns DataFrame with columns ['date', series_id]. Empty if not present.
+    """
+    from shared.chromadb_client import DataPipelineChromaDB
+    db = DataPipelineChromaDB()
+    res = db.query_by_metadata("fred_historical_data", {"series_id": series_id})
+    if not res:
+        return pd.DataFrame(columns=["date", series_id])
+    rows = []
+    for md in res["metadatas"]:
+        dd = md.get("data_date")
+        val = md.get("value")
+        if dd is None or val is None:
+            continue
+        rows.append({"date": dd, series_id: float(val)})
+    if not rows:
+        return pd.DataFrame(columns=["date", series_id])
+    df = pd.DataFrame(rows)
+    df["date"] = pd.to_datetime(df["date"])
+    return df.drop_duplicates("date").sort_values("date").reset_index(drop=True)
+
+
+def fetch_fred_series(series_id: str, api_key: str | None = None,
+                     start: str = "2013-01-01") -> pd.DataFrame:
+    """Read a FRED series. Prefers Agent_Project ChromaDB; falls back to
+    FRED API for any date range the ChromaDB doesn't cover.
+
+    api_key is accepted for backwards compatibility but unused — the API
+    fallback path loads the key directly when needed.
+    """
+    chroma = _chromadb_fetch(series_id)
+    requested_start = pd.Timestamp(start)
+    chroma_start = chroma["date"].min() if not chroma.empty else None
+
+    if chroma_start is None or chroma_start > requested_start:
+        gap_end = (chroma_start - pd.Timedelta(days=1)).strftime("%Y-%m-%d") if chroma_start is not None else None
+        backfill = _fred_api_fetch(series_id, start=start, end=gap_end)
+        df = pd.concat([backfill, chroma], ignore_index=True)
+    else:
+        df = chroma[chroma["date"] >= requested_start].copy()
+    return df.drop_duplicates("date").sort_values("date").reset_index(drop=True)
 
 
 def load_spy_daily() -> pd.DataFrame:
@@ -183,12 +237,11 @@ def main():
     print("  SPY ↔ 10Y Yield lead-lag study")
     print("=" * 90)
 
-    api_key = load_fred_key()
-    print("  Fetching FRED DGS10 (10Y Treasury)...")
-    dgs10 = fetch_fred_series("DGS10", api_key)
+    print("  Loading DGS10 (10Y Treasury) — ChromaDB + FRED fallback for pre-2021...")
+    dgs10 = fetch_fred_series("DGS10")
     print(f"    {len(dgs10):,} observations, {dgs10['date'].min().date()} → {dgs10['date'].max().date()}")
-    print("  Fetching FRED DGS2 (2Y Treasury)...")
-    dgs2 = fetch_fred_series("DGS2", api_key)
+    print("  Loading DGS2 (2Y Treasury)...")
+    dgs2 = fetch_fred_series("DGS2")
     print(f"    {len(dgs2):,} observations")
 
     print("  Loading SPY daily (ORATS)...")

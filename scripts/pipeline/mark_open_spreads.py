@@ -1,11 +1,9 @@
 """
 Daily mark-to-market for open credit spreads.
 
-Replaces the disabled Metal_Project spread_score_tracker --mark cron
-(disabled 2026-05-02 as part of the phase-out). The 50% / 80% credit-
-captured alerts in daily_alert.py read spread_score_daily.mark_credit;
-without a fresh mark each trading day they silently no-op, hiding
-profit-target hits on real positions.
+The 50% / 80% credit-captured alerts in daily_alert.py read
+spread_score_daily.mark_credit; without a fresh mark each trading day
+they silently no-op, hiding profit-target hits on real positions.
 
 Runs against every open `placed=1` row in spread_score_trades. For each
 trade, fetches the live Schwab chain via lib.schwab_options.fetch_chain_with_greeks
@@ -42,9 +40,8 @@ import pandas as pd
 ROOT = Path.home() / "MaxPain_Project"
 sys.path.insert(0, str(ROOT))
 
+from lib.db import DB_PATH  # noqa: E402
 from lib.schwab_options import fetch_chain_with_greeks  # noqa: E402
-
-DB_PATH = Path.home() / "Metal_Project/data/shared/metal_project.db"
 
 # Spread-types that are credit verticals (short - long = positive credit).
 # Anything else is skipped — this script does not mark debit structures.

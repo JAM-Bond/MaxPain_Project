@@ -17,10 +17,11 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from .db import DB_PATH
+
 ROOT = Path.home() / "MaxPain_Project"
 SOUL_PATH = ROOT / "config" / "SOUL.md"
 API_KEYS_ENV = ROOT / "config" / "api_keys.env"
-DB_PATH = Path.home() / "Metal_Project/data/shared/metal_project.db"
 
 MODEL = "claude-opus-4-7"
 MAX_TOKENS = 16000

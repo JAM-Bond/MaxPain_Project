@@ -1,6 +1,6 @@
 """Read-only DB accessors for the Landing page.
 
-All queries hit ~/Metal_Project/data/shared/metal_project.db via SQLite.
+All queries hit ~/MaxPain_Project/data/shared/maxpain.db via SQLite.
 Live close-side marks come from scripts/monitor/close_helper.py.
 Cascade state comes from scripts/monitor/regime_health.py via the
 regime_state table.
@@ -12,9 +12,10 @@ import sys
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-DB_PATH = Path.home() / "Metal_Project/data/shared/metal_project.db"
 ROOT = Path.home() / "MaxPain_Project"
 sys.path.insert(0, str(ROOT))
+
+from lib.db import DB_PATH  # noqa: E402
 
 
 def _conn():

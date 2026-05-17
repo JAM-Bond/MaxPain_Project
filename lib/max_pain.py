@@ -2,7 +2,6 @@
 MaxPain — Pure-math option-chain analytics
 ~/MaxPain_Project/lib/max_pain.py
 
-Lifted from ~/Metal_Project/scripts/pipeline/yfinance_daily_snapshot.py.
 All functions here are stateless — they take pandas DataFrames and return
 dicts of metrics. No I/O, no DB, no auth. Used by snapshot.py and any
 analysis script that wants to compute pin / gamma / expected-move metrics

@@ -6,11 +6,8 @@ Takes a symbol + OpEx + today and returns a dict of all summary metrics
 (price, max pain, distance, PCR, gamma profile, ATM IV, dividend flag, ...).
 Schwab is primary; yfinance is fallback.
 
-Lifted from ~/Metal_Project/scripts/pipeline/yfinance_daily_snapshot.py.
-The Metal_Project ETF_META dependency is removed in favor of always checking
-dividends via yfinance (the original "default to True for stocks" path covers
-this). Trading-days-to-OpEx helper is included locally to avoid a config
-dependency.
+Dividends are probed via yfinance (no per-ETF override). Trading-days-to-OpEx
+helper is included locally to avoid a config dependency.
 """
 from __future__ import annotations
 
@@ -121,8 +118,7 @@ def take_snapshot(symbol: str, opex: date, today: date) -> dict | None:
 
         dte = trading_days_to(opex, today)
 
-        # Dividend flag: always probe via yfinance (Metal_Project's ETF_META
-        # was a per-ETF override; the default behavior was to check anyway).
+        # Dividend flag: always probe via yfinance.
         if yf is not None:
             try:
                 div_info = check_dividend_flag(yf.Ticker(symbol), opex)
@@ -183,7 +179,7 @@ def take_snapshot(symbol: str, opex: date, today: date) -> dict | None:
         return None
 
 
-# ─── OpEx-calendar helper (matches Metal_Project's current_opex) ───
+# ─── OpEx-calendar helper ───
 def third_friday(year: int, month: int) -> date:
     first = date(year, month, 1)
     return first + timedelta(days=(4 - first.weekday()) % 7 + 14)

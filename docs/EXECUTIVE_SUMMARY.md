@@ -12,7 +12,7 @@ This system is designed for a **solo retail trader** with a ~$100,000 capital ba
 
 ### Data sources
 
-The system is DB-centric. All per-day data lives in a local SQLite database (`~/Metal_Project/data/shared/metal_project.db`); scripts read and write to it, and no hardcoded symbol lists exist anywhere in the codebase. The data stack:
+The system is DB-centric. All per-day data lives in a local SQLite database (`~/MaxPain_Project/data/shared/maxpain.db`); scripts read and write to it, and no hardcoded symbol lists exist anywhere in the codebase. The data stack:
 
 - **Daily OHLCV** — Schwab Market Data API (primary), yfinance (fallback on Schwab auth failure).
 - **Live option chains (OI, IV, greeks, strike structure)** — Schwab `/marketdata/v1/chains` endpoint.

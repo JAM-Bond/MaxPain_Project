@@ -15,10 +15,8 @@ import pandas as pd
 import requests
 
 ROOT = Path.home() / "MaxPain_Project"
-METAL_ROOT = Path.home() / "Metal_Project"
 BACKTEST_DIR = ROOT / "scripts/backtest"
 sys.path.insert(0, str(ROOT))
-sys.path.insert(0, str(METAL_ROOT))
 sys.path.insert(0, str(BACKTEST_DIR))  # structures.py uses bare "from legs import ..." style
 
 from structures import open_zebra  # noqa: E402

@@ -19,7 +19,10 @@ import sys
 from datetime import date
 from pathlib import Path
 
-DB_PATH = "/Users/josephmorris/Metal_Project/data/shared/metal_project.db"
+sys.path.insert(0, str(Path.home() / "MaxPain_Project"))
+
+from lib.db import DB_PATH  # noqa: E402
+
 SPY_PARQUET = Path.home() / "MaxPain_Project/data/orats/by_ticker/SPY.parquet"
 
 # ─── Pre-registered backtest expectations (per pre-reg doc) ──────────────────

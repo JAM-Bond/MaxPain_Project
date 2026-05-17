@@ -1,5 +1,7 @@
 # Merge Plan — Metal_Project → MaxPain_Project
 
+> **SUPERSEDED 2026-05-17.** The migration took a different path than this doc anticipated. Current state and the remaining one-week observation window live in the memory file `project_metal_phaseout_audit_20260504.md`. Cron + Schwab.auth + DB-path constant + physical DB move are all done; only the acceptance-test wait remains before `~/Metal_Project/` is deleted. The phases below are kept as historical record only — paths/scripts they reference may no longer exist.
+
 Companion to `~/Metal_Project/AUDIT.md`. AUDIT decides *what* merges; this doc tracks *how* and *when*.
 
 **Target:** Summer 2026, after May + June 2026 OpEx post-mortems.

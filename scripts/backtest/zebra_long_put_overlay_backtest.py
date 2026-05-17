@@ -25,6 +25,7 @@ Output:
 """
 from __future__ import annotations
 
+import argparse
 import logging
 import sys
 from pathlib import Path
@@ -40,11 +41,16 @@ from legs import Position, Leg, price_long_put, close_cost_put
 
 ROOT = Path("/Users/josephmorris/MaxPain_Project")
 BY_TICKER = ROOT / "data/orats/by_ticker"
-RESULTS_OUT = ROOT / "data/profile/zebra_put_overlay_results.parquet"
 
 ENTRY_DTE = 75
-SLIP = 0.25  # match Phase C
+DEFAULT_SLIP = 0.25  # match Phase C
+SLIP = DEFAULT_SLIP   # overridable via --slip
+
+# Cohorts (mirror scripts/qualifier/gate_config.py)
 TIER1 = ["SPY", "QQQ", "MSFT", "NVDA", "GOOGL", "META", "AMZN"]
+TIER2 = ["DIA", "IWM", "GLD", "TJX", "GE", "WMT", "AMD", "PLTR",
+         "KRE", "CMG", "SCHW", "CSCO", "TTD", "USB"]
+COHORTS = {"tier1": TIER1, "tier2": TIER2}
 
 # Put-overlay strike grid (% below spot at entry)
 PUT_VARIANTS = {
@@ -233,28 +239,45 @@ def simulate_ticker(ticker: str) -> list:
 
 
 def main():
+    global SLIP
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--cohort", choices=list(COHORTS), default="tier1",
+                    help="Which cohort to run (default: tier1 — matches Phase 1).")
+    ap.add_argument("--slip", type=float, default=DEFAULT_SLIP,
+                    help=f"Bid-ask slip (default: {DEFAULT_SLIP} — matches Phase C).")
+    args = ap.parse_args()
+
+    SLIP = args.slip
+    cohort_name = args.cohort
+    cohort = COHORTS[cohort_name]
+    suffix = "" if args.slip == DEFAULT_SLIP else f"_slip{int(args.slip * 100):02d}"
+    if cohort_name == "tier1":
+        results_out = ROOT / f"data/profile/zebra_put_overlay_results{suffix}.parquet"
+    else:
+        results_out = ROOT / f"data/profile/zebra_put_overlay_{cohort_name}_results{suffix}.parquet"
+
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(message)s")
     log = logging.getLogger("zebra_overlay")
-    log.info("ZEBRA + long-put overlay backtest on tier-1 cohort: %s", TIER1)
+    log.info("ZEBRA + long-put overlay backtest on %s cohort: %s", cohort_name, cohort)
 
     all_results = []
-    for i, t in enumerate(TIER1, 1):
+    for i, t in enumerate(cohort, 1):
         s = simulate_ticker(t)
         all_results.extend(s)
-        log.info("  [%d/%d] %s: %d cycles", i, len(TIER1), t, len(s))
+        log.info("  [%d/%d] %s: %d cycles", i, len(cohort), t, len(s))
 
     if not all_results:
         log.error("No cycles produced")
         return
 
     df = pd.DataFrame(all_results)
-    RESULTS_OUT.parent.mkdir(parents=True, exist_ok=True)
-    df.to_parquet(RESULTS_OUT, index=False)
-    log.info("Wrote %d cycles to %s", len(df), RESULTS_OUT)
+    results_out.parent.mkdir(parents=True, exist_ok=True)
+    df.to_parquet(results_out, index=False)
+    log.info("Wrote %d cycles to %s", len(df), results_out)
 
     # Quick summary
-    print("\n=== ZEBRA + long-put overlay results (tier-1 cohort, all years) ===")
+    print(f"\n=== ZEBRA + long-put overlay results ({cohort_name} cohort, all years) ===")
     print(f"Total cycles: {len(df)}")
     print()
 

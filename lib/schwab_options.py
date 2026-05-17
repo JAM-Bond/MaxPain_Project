@@ -2,15 +2,9 @@
 MaxPain — Schwab Options Chain Fetcher
 ~/MaxPain_Project/lib/schwab_options.py
 
-Lifted from ~/Metal_Project/scripts/pipeline/schwab_options.py as part of
-Tranche 1 (Metal → MaxPain migration). Stateless function — fetches live
-option chains from Schwab's /marketdata/v1/chains endpoint and returns
-calls/puts as pandas DataFrames matching the yfinance column convention.
-
-Auth dependency: imports Schwab.auth.get_valid_token from Metal_Project.
-That import will be lifted in a later tranche when the token store moves.
-For now, the cross-project sys.path import is the one remaining
-Metal_Project dependency for stateless option-chain math.
+Stateless function — fetches live option chains from Schwab's
+/marketdata/v1/chains endpoint and returns calls/puts as pandas DataFrames
+matching the yfinance column convention.
 """
 
 import sys
@@ -18,8 +12,8 @@ from pathlib import Path
 
 import requests
 
-# Auth still lives in Metal_Project for now (deferred to a later tranche).
-sys.path.insert(0, str(Path.home() / "Metal_Project"))
+# Auth lives in this project. PROJECT_ROOT = ~/MaxPain_Project.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from Schwab.auth import get_valid_token  # noqa: E402
 
 CHAINS_URL = "https://api.schwabapi.com/marketdata/v1/chains"

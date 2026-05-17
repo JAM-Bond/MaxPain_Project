@@ -12,7 +12,7 @@ SQLite ALTER TABLE cannot relax NOT NULL constraints in place.
 Consumers that filter by spread_type can branch on 'stock' to handle
 shares-based vs strike-based math.
 
-Source: Metal_Project trade_log, entry_date='2026-04-07', 11 trades
+Source: stock trade_log, entry_date='2026-04-07', 11 trades
 totaling +$1,761 P/L on the 2026-04-17 OpEx cycle.
 
 Idempotent: safe to re-run; INSERT OR IGNORE on (symbol, entry_date,
@@ -23,9 +23,12 @@ from __future__ import annotations
 
 import argparse
 import sqlite3
+import sys
 from pathlib import Path
 
-DB = Path.home() / "Metal_Project/data/shared/metal_project.db"
+sys.path.insert(0, str(Path.home() / "MaxPain_Project"))
+
+from lib.db import DB_PATH as DB  # noqa: E402
 
 
 def main() -> None:

@@ -9,8 +9,11 @@ Only updates rows where qualifier_run_date IS NULL.
 import argparse
 import sqlite3
 import sys
+from pathlib import Path
 
-DB_PATH = "/Users/josephmorris/Metal_Project/data/shared/metal_project.db"
+sys.path.insert(0, str(Path.home() / "MaxPain_Project"))
+
+from lib.db import DB_PATH  # noqa: E402
 
 
 def main(dry_run: bool) -> int:

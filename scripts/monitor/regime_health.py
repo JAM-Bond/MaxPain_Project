@@ -30,9 +30,9 @@ import pandas as pd
 
 ROOT = Path.home() / "MaxPain_Project"
 sys.path.insert(0, str(ROOT))
+from lib.db import DB_PATH  # noqa: E402
 from scripts.qualifier import gate_config as G  # noqa: E402
 
-DB_PATH = Path.home() / "Metal_Project/data/shared/metal_project.db"
 ORATS_BY_TICKER = ROOT / "data/orats/by_ticker"
 
 # ── Early-warning cascade configuration ────────────────────────────────────
