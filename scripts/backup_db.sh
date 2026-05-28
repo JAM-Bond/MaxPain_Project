@@ -92,6 +92,9 @@ while IFS= read -r old_file; do
     fi
     rm "$old_file"
     echo "$LOG_PREFIX Deleted: $old_file"
+    # Remove SQLite WAL/SHM companions if present (they're useless without the .db parent)
+    [ -f "${old_file}-shm" ] && rm "${old_file}-shm" && echo "$LOG_PREFIX Deleted: ${old_file}-shm"
+    [ -f "${old_file}-wal" ] && rm "${old_file}-wal" && echo "$LOG_PREFIX Deleted: ${old_file}-wal"
     ((DELETED++)) || true
 done < <(find "$BACKUP_DIR" -name "maxpain_*.db" -mtime +$KEEP_DAYS)
 
