@@ -18,26 +18,25 @@ from __future__ import annotations
 #     "Symbols that respond well" sections) ──────────────────────────
 
 COHORT_BULL_PUT = [
-    "MSFT", "TJX", "WMT", "QQQ", "CNC", "RIO", "SPY", "DAL",
-    "INTC", "WFC", "XLU", "HYG",
-    # v2 expansion 2026-05-02 (Tier A + top Tier B; see UNIVERSE_EXPANSION_V2_PREREG.md)
-    "AVGO", "JPM", "GS", "GNRC", "SMH", "RCL", "FSLR", "AMAT",
-    # v3 expansion 2026-05-06 — top 10 of 19 unpromoted v2 walk-forward survivors
-    # All cleared train+val+direction+BH-FDR+val_mean gates at slip=0.50.
-    # Source: data/profile/universe_expansion_v2_candidates.parquet, ranked by val_mean.
-    # Liquidity sanity confirmed live 2026-05-06 (ATM bid-ask ≤ 14% of mid).
-    "COF", "NET", "CIEN", "GOOG", "MRK", "GLW", "COP", "MS", "CMG", "EXPE",
-]
+    "MSFT", "TJX", "WMT", "QQQ", "CNC", "SPY",
+    "INTC", "WFC", "XLU", "HYG", "AVGO", "JPM",
+    "GS", "GNRC", "SMH", "RCL", "FSLR", "AMAT",
+    "COF", "NET", "CIEN", "GOOG", "MRK", "GLW",
+    "COP", "MS", "CMG", "EXPE", "SLV", "XLE",
+    "GLD", "AAPL", "MU", "ORCL", "HOOD", "NU",
+    "C", "CSCO", "XSP", "RIOT", "RKLB", "NEM",
+    "VST", "CVX", "TEVA", "RTX", "TSEM", "COHR",
+    "KKR", "STX", "CLS", "VLO", "FANG", "KGC",
+    "HWM", "RRC", "TBT", "TOL",
+]  # auto-promotion update 2026-05-21
 
 COHORT_BEAR_CALL = [
     "SPX", "SPY", "QQQ", "DIA", "IWM", "WMT",
-    # v2 expansion 2026-05-02 (Tier B; deploy when H1 fires)
-    "EL", "TGT", "BA",
-    # v3 expansion 2026-05-06 — top 5 of 9 unpromoted v2 walk-forward survivors
-    # Same methodology + gates as bull_put v3. Deploy when H1 gate fires
-    # (SPY < 200dma + IVR > 0.5).
-    "MMM", "DVN", "HUM", "ADBE", "IBM",
-]
+    "EL", "TGT", "BA", "MMM", "DVN", "HUM",
+    "ADBE", "IBM", "SNAP", "XLP", "IEF", "GME",
+    "UNH", "DOW", "MRK", "NEE", "LCID", "TMF",
+    "ZTS", "STZ",
+]  # auto-promotion update 2026-05-28
 
 COHORT_INVERTED_FLY_PAIR = [
     "SPX", "SPY", "QQQ", "GLD", "EFA", "WMT", "NEM", "XOM",
@@ -45,31 +44,34 @@ COHORT_INVERTED_FLY_PAIR = [
 ]
 
 COHORT_INVERTED_FLY_SINGLE = [
-    "TSLA", "AMD", "NVDA", "CAR", "AMZN", "META", "GOOGL", "BABA",
-    "SCCO", "GOLD", "CLF",
-    # v2 expansion 2026-05-02 (Tier A; standalone IF — methodology was per-ticker walk-forward without bull_put pairing)
-    "ISRG", "XLK", "PEP", "STX",
-    # v3 expansion 2026-05-06 — top 3 of 9 unpromoted v2 walk-forward survivors
-    # under the new $300 spot cap. LRCX is the standout (+$7.37 val_mean, 4-7×
-    # the next best). MCD/JNJ also clear walk-forward; AMAT/TER excluded —
-    # spot > $300 produces NOC-sized debits.
-    "LRCX", "MCD", "JNJ",
-]
+    "TSLA", "AMD", "NVDA", "CAR", "AMZN", "GOOGL",
+    "BABA", "SCCO", "GOLD", "CLF", "ISRG", "XLK",
+    "PEP", "STX", "LRCX", "MCD", "JNJ", "PDD",
+    "AG", "DELL", "AFRM",
+]  # auto-promotion update 2026-05-21
 
 COHORT_ZEBRA_TIER1 = [
     "SPY", "QQQ", "MSFT", "NVDA", "GOOGL", "META", "AMZN",
 ]
 
 COHORT_ZEBRA_TIER2 = [
-    "DIA", "IWM", "GLD", "TJX", "GE", "WMT", "AMD", "PLTR",
-    "KRE",  # promoted 2026-05-01 via universe expansion (see ZEBRA_UNIVERSE_EXPANSION_PREREG.md)
-    # v2 universe expansion 2026-05-03 — sub-$100, all six v1 gates pass + the
-    # stricter v2 walk-forward (val median capture ≥ 1.05 AND val ZEBRA mean
-    # ≥ val stock mean × 1.10). 6/11 sub-$100 candidates survived; TNA
-    # excluded as a 3x leveraged ETF (path-dependent decay risk).
-    # See zebra_universe_expansion_v2_promoted.parquet for full audit trail.
-    "CMG", "SCHW", "CSCO", "TTD", "USB",
-]
+    "DIA", "IWM", "GLD", "TJX", "GE", "WMT",
+    "AMD", "PLTR", "KRE", "CMG", "SCHW", "CSCO",
+    "TTD", "USB", "XLF", "XLE", "INTC", "TSLA",
+    "NFLX", "AAPL", "MU", "BAC", "ORCL", "SMH",
+    "USO", "CVNA", "GOOG", "MRVL", "FCX", "EWY",
+    "C", "XOM", "XSP", "DVN", "JPM", "DAL",
+    "VST", "NEE", "SBUX", "CVX", "JNJ", "NET",
+    "ANET", "V", "MS", "COP", "BP", "UAL",
+    "AMAT", "TXN", "AA", "IBM", "CRWD", "APA",
+    "BX", "APO", "GS", "RIO", "COF", "COHR",
+    "CAT", "WMB", "PM", "EOG", "TTWO", "SPOT",
+    "KKR", "AXP", "BHP", "MMM", "RCL", "STX",
+    "ROKU", "KR", "ETN", "ADI", "ALK", "VLO",
+    "OKE", "LYV", "LNG", "MPC", "ADM", "LIN",
+    "EIX", "AZN", "PWR", "SCCO", "TBT", "MTZ",
+    "KEYS", "SOXX", "XLK", "SE", "RMBS", "TER",
+]  # auto-promotion update 2026-05-28
 
 # Per-name overlay AUTO-attach cohort.
 # Names where the V3 (10% OTM put) overlay showed positive cohort-level lift

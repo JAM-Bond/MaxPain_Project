@@ -121,6 +121,11 @@ _LIMIT_SLIP_CREDIT = 0.05    # selling premium → ask ≥ mid + $0.05
 _LIMIT_SLIP_DEBIT = 0.05     # buying premium → bid ≤ mid − $0.05
 _WIDE_BIDASK_RATIO = 0.20    # flag if any leg's (ask-bid)/mid > 20%
 
+# Credit-spread stop policy (project_credit_spread_stop_policy.md, sealed
+# 2026-05-07): STP LMT MARK GTC at 2× entry credit, limit = trigger + $0.10.
+_STOP_MULTIPLIER = 2.0
+_STOP_LIMIT_BUFFER = 0.10
+
 
 def _liquidity_flag(legs_bidask: list[tuple[float, float, float]]) -> str | None:
     """Given list of (bid, mid, ask), return a warning string if any leg's
@@ -289,7 +294,7 @@ def _inverted_fly_metrics(pos, chain=None) -> dict:
     }
 
 
-def _vertical_metrics(pos, kind: str, chain=None) -> dict:
+def _vertical_metrics(pos, kind: str, chain=None, symbol: str = "") -> dict:
     """bull_put or bear_call — 2-leg credit vertical."""
     n = pos.notes
     short_leg, long_leg = pos.legs  # convention: [short, long]
@@ -302,12 +307,14 @@ def _vertical_metrics(pos, kind: str, chain=None) -> dict:
         side_label = "put credit spread (bullish)"
         leg_label_short = "Short put"
         leg_label_long = "Long  put"
+        put_or_call = "PUT"
     else:  # bear_call
         breakeven = short_leg.strike + credit
         be_label = "Breakeven (price ceiling)"
         side_label = "call credit spread (bearish)"
         leg_label_short = "Short call"
         leg_label_long = "Long  call"
+        put_or_call = "CALL"
 
     # Bid/ask lookup + tradeable-range computation
     short_bid, short_ask = _leg_bidask(chain, short_leg) if chain is not None else (0.0, 0.0)
@@ -334,6 +341,26 @@ def _vertical_metrics(pos, kind: str, chain=None) -> dict:
     legs_ba = [(short_bid, short_leg.price, short_ask), (long_bid, long_leg.price, long_ask)]
     liq_warn = _liquidity_flag(legs_ba)
 
+    # Stop-loss block: STP LMT MARK GTC at 2× entry credit (sealed policy
+    # 2026-05-07; see project_credit_spread_stop_policy.md). Closes both legs
+    # as one spread order on the BUY side.
+    stop_trigger = credit * _STOP_MULTIPLIER
+    stop_limit = stop_trigger + _STOP_LIMIT_BUFFER
+    # Ks/Kl strike strings — strip trailing .0 for whole-dollar strikes
+    k_s = f"{short_leg.strike:g}"
+    k_l = f"{long_leg.strike:g}"
+    expiry_str = pd.Timestamp(pos.expiration).strftime("%d %b %y").upper()
+    sym = symbol if symbol else "<TICKER>"
+    tos_line = (f"BUY +1 {sym} VERTICAL {expiry_str} "
+                  f"{k_s}/{k_l} {put_or_call}  "
+                  f"STP {stop_trigger:.2f} LMT {stop_limit:.2f} MARK GTC")
+    stop_block = [
+        ("─── Stop-loss (2× credit policy) ───", ""),
+        ("Stop trigger (STP)", f"${stop_trigger:.2f}  ({_STOP_MULTIPLIER:.0f}× entry credit — realized loss ≤ −100% capture)"),
+        ("Stop limit (LMT)", f"${stop_limit:.2f}  (trigger + ${_STOP_LIMIT_BUFFER:.2f} fill buffer)"),
+        ("TOS order", tos_line),
+    ]
+
     return {
         "structure_label": f"{kind.replace('_', ' ').title()} — {side_label}",
         "rows": [
@@ -348,14 +375,14 @@ def _vertical_metrics(pos, kind: str, chain=None) -> dict:
              f"{credit/wing:.2f}  ("
              f"{'PASS — meets ' + f'{G.MIN_CREDIT_WIDTH:.2f}' + ' loss-cap floor' if credit/wing >= G.MIN_CREDIT_WIDTH else 'FAIL — below ' + f'{G.MIN_CREDIT_WIDTH:.2f}' + ' floor'})"),
             (be_label, f"${breakeven:.2f}"),
-        ] + range_block,
+        ] + stop_block + range_block,
         "sizing": (f"Per loss-cap rule: realized loss ≤ 2× target win. "
                     f"Skip if credit/width < {G.MIN_CREDIT_WIDTH:.2f}."),
         "liquidity_warning": liq_warn,
     }
 
 
-def _metrics_for(pos, structure: str, chain=None) -> dict:
+def _metrics_for(pos, structure: str, chain=None, symbol: str = "") -> dict:
     if structure == "anti_zebra":
         return _anti_zebra_metrics(pos, chain)
     if structure.startswith("zebra"):
@@ -363,9 +390,9 @@ def _metrics_for(pos, structure: str, chain=None) -> dict:
     if structure.startswith("inverted_fly"):
         return _inverted_fly_metrics(pos, chain)
     if structure.startswith("bull_put"):
-        return _vertical_metrics(pos, "bull_put", chain)
+        return _vertical_metrics(pos, "bull_put", chain, symbol=symbol)
     if structure.startswith("bear_call"):
-        return _vertical_metrics(pos, "bear_call", chain)
+        return _vertical_metrics(pos, "bear_call", chain, symbol=symbol)
     raise ValueError(f"unknown structure {structure!r}")
 
 
@@ -577,7 +604,7 @@ def build_construction_block(
         return {"ok": False, "text": "", "html": "", "error": err}
 
     try:
-        m = _metrics_for(pos, structure, chain)
+        m = _metrics_for(pos, structure, chain, symbol=symbol)
         if is_mp_anchored:
             m["structure_label"] = (
                 f"Bull Put (MP-anchored, T-5) — put credit spread "

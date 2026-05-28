@@ -28,11 +28,17 @@ from pathlib import Path
 from datetime import datetime, timezone
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
-# Locate env file relative to this file's project root so the script stays
-# self-contained and can't drift against a sibling project's env file.
+# Schwab credentials live in a shared location (~/.config/schwab/) consumed by
+# both MaxPain_Project and Agent_Project. The two projects share one Schwab
+# developer app (same CLIENT_ID/SECRET) and therefore one refresh-token
+# lineage; rotating in one project would invalidate the other's cached token
+# if each kept its own env. Sharing one env + one lock file eliminates
+# cross-project rotation races. See `project_schwab_cross_project_lock_fix_planned.md`
+# and `reference_schwab_reauth.md` for the design + 2026-05-18 incident.
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-ENV_PATH     = PROJECT_ROOT / "config" / "api_keys.env"
-LOCK_PATH    = PROJECT_ROOT / "config" / ".api_keys.env.lock"
+SCHWAB_CONFIG_DIR = Path.home() / ".config" / "schwab"
+ENV_PATH     = SCHWAB_CONFIG_DIR / "credentials.env"
+LOCK_PATH    = SCHWAB_CONFIG_DIR / ".credentials.env.lock"
 
 # Max seconds to wait for the refresh lock before giving up. Schwab refresh
 # rountrips usually complete in <2s; 30s is generous slack for retries.
@@ -52,9 +58,11 @@ def _token_refresh_lock(timeout: float = REFRESH_LOCK_TIMEOUT):
     full rotation-race diagnosis on the 2026-05-10 failure.
 
     Implementation: advisory fcntl.flock on a dedicated lock file
-    (`config/.api_keys.env.lock`). The env file itself is NOT locked —
-    keeping lock semantics decoupled from file content avoids any
-    accidental coupling with reader paths that don't acquire the lock.
+    (`~/.config/schwab/.credentials.env.lock`). The env file itself is
+    NOT locked — keeping lock semantics decoupled from file content
+    avoids any accidental coupling with reader paths that don't acquire
+    the lock. Lock file lives in the shared dir so MaxPain + Agent_Project
+    processes serialize on the same flock.
     Polls non-blocking with a short sleep so deadline enforcement is
     honored; releases on context exit (including exceptions).
     """
@@ -380,6 +388,7 @@ def get_valid_token() -> str:
     # concurrent process already refreshed, the access token will be valid
     # and we can skip the network call entirely (double-checked locking).
     refresh_failed = False
+    mtime_before_lock = ENV_PATH.stat().st_mtime if ENV_PATH.exists() else 0
     with _token_refresh_lock():
         token = load_token()
         if token is None or is_refresh_token_expired(token):
@@ -394,8 +403,32 @@ def get_valid_token() -> str:
                 token = refresh_access_token(client_id, client_secret, token)
                 save_token(token)
             except RuntimeError as e:
-                print(f"  Refresh failed: {e}")
-                refresh_failed = True
+                # Option C — retry once on invalid_grant if the env file has
+                # been touched since we entered. Catches the case where
+                # another process (e.g. a cross-project reauth) rotated
+                # between our load_token() above and the refresh call. If
+                # the env hasn't moved, retry can't help — fall straight
+                # through to browser flow.
+                err_msg = str(e)
+                mtime_now = ENV_PATH.stat().st_mtime if ENV_PATH.exists() else 0
+                if "invalid_grant" in err_msg and mtime_now > mtime_before_lock:
+                    print(f"  Refresh failed ({e.__class__.__name__}); env file "
+                          f"changed since lock entry — retrying once with fresh token.")
+                    token_retry = load_token()
+                    if token_retry is not None and not is_refresh_token_expired(token_retry):
+                        try:
+                            token = refresh_access_token(
+                                client_id, client_secret, token_retry
+                            )
+                            save_token(token)
+                        except RuntimeError as e2:
+                            print(f"  Retry refresh also failed: {e2}")
+                            refresh_failed = True
+                    else:
+                        refresh_failed = True
+                else:
+                    print(f"  Refresh failed: {e}")
+                    refresh_failed = True
 
     if refresh_failed:
         print("  Falling back to browser authorization flow.")

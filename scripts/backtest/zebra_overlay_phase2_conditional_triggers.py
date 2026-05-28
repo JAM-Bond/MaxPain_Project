@@ -1,4 +1,4 @@
-"""ZEBRA + put overlay Phase 2 — C1/C2/C3 conditional triggers.
+"""ZEBRA + put overlay Phase 2 — C1/C2/C3/C4 conditional triggers.
 
 The phase 1 V3 default attaches a 10%-OTM put at every ZEBRA entry. Conditional
 triggers only attach the put when a regime / drawdown signal fires. The
@@ -13,9 +13,10 @@ Variants:
        (term-structure inversion)
   C3 : add 10%-OTM put AT ZEBRA ENTRY iff breadth divergence fires
        (spx_pct_to_50dma > 7 AND pct_above_50dma < 55)
-  C4 (skipped — 30Y > 5% threshold): no 30Y yield parquet in the local
-       data store. C4 requires extending the signal stack via FRED /
-       Agent_Project. Captured in pending-investigations memo.
+  C4 : add 10%-OTM put AT ZEBRA ENTRY iff DGS30 >= 5.0% (long-end
+       repricing regime — first since 2007). DGS30 history sourced from
+       Agent_Project ChromaDB fred_historical_data collection.
+       Added 2026-05-17 after 30Y crossed 5% on 2026-05-14.
 
 Baselines for comparison:
   BARE  : ZEBRA only (no overlay)
@@ -57,6 +58,7 @@ PUT_PCT_BELOW = 0.10
 C1_DRAWDOWN = 0.05           # 5% drop from ZEBRA entry spot
 C3_SPX_50DMA_THRESHOLD = 7.0  # SPX > 7% above its 50dma
 C3_BREADTH_THRESHOLD = 55.0   # but breadth < 55%
+C4_DGS30_THRESHOLD = 5.0      # 30Y yield ≥ 5% (long-end repricing regime)
 
 
 def _parse_exp(s):
@@ -65,6 +67,33 @@ def _parse_exp(s):
         return pd.Timestamp(year=int(y), month=int(m), day=int(d))
     except Exception:
         return None
+
+
+def _load_dgs30_map():
+    """Read DGS30 daily series from Agent_Project ChromaDB and return
+    {date: yield_pct}. Empty dict if Agent_Project unavailable — caller
+    treats missing dates as "no C4 fire", matching how C2/C3 handle gaps.
+    """
+    try:
+        import sys as _sys
+        _sys.path.insert(0, str(Path.home() / "Agent_Project"))
+        from shared.chromadb_client import DataPipelineChromaDB
+    except Exception:
+        return {}
+    db = DataPipelineChromaDB()
+    res = db.query_by_metadata("fred_historical_data", {"series_id": "DGS30"})
+    if not res:
+        return {}
+    out = {}
+    for md in res["metadatas"]:
+        d = md.get("data_date")
+        v = md.get("value")
+        if d and v is not None:
+            try:
+                out[pd.to_datetime(d).date()] = float(v)
+            except Exception:
+                continue
+    return out
 
 
 def load_signals():
@@ -77,7 +106,9 @@ def load_signals():
     breadth_map = breadth.set_index("date")[
         ["pct_above_50dma", "spx_pct_to_50dma"]
     ].to_dict("index")
-    return term_map, breadth_map
+
+    dgs30_map = _load_dgs30_map()
+    return term_map, breadth_map, dgs30_map
 
 
 def open_long_put_at_pct(chain, spot, signed_pct):
@@ -102,7 +133,7 @@ def intrinsic_put(K, S_exp):
 
 
 def simulate_cycle(slice_by_day, available_days, entry_date, expiration,
-                   ticker, term_map, breadth_map):
+                   ticker, term_map, breadth_map, dgs30_map):
     entry_chain = slice_by_day.get(entry_date)
     if entry_chain is None or entry_chain.empty:
         return None
@@ -129,11 +160,17 @@ def simulate_cycle(slice_by_day, available_days, entry_date, expiration,
                and breadth_row["spx_pct_to_50dma"] > C3_SPX_50DMA_THRESHOLD
                and breadth_row["pct_above_50dma"] < C3_BREADTH_THRESHOLD)
 
-    # If C2 / C3 fire, attach an at-entry V3 put (same as HOLD)
+    # C4: 30Y yield ≥ 5% at entry
+    dgs30_entry = dgs30_map.get(entry_date)
+    c4_fire = dgs30_entry is not None and dgs30_entry >= C4_DGS30_THRESHOLD
+
+    # If C2 / C3 / C4 fire, attach an at-entry V3 put (same as HOLD)
     c2_debit = hold_debit if c2_fire else 0.0
     c3_debit = hold_debit if c3_fire else 0.0
+    c4_debit = hold_debit if c4_fire else 0.0
     c2_strike = hold_put["strike"]
     c3_strike = hold_put["strike"]
+    c4_strike = hold_put["strike"]
 
     # C1: walk forward to find first day where spot <= 0.95 * spot_entry
     # If trigger fires, attach a 10%-OTM put on THAT day's chain at the new spot.
@@ -175,6 +212,7 @@ def simulate_cycle(slice_by_day, available_days, entry_date, expiration,
     pnl_c1 = (intrinsic_put(c1_strike, S_exp) - c1_debit) if c1_fire else 0.0
     pnl_c2 = (intrinsic_put(c2_strike, S_exp) - c2_debit) if c2_fire else 0.0
     pnl_c3 = (intrinsic_put(c3_strike, S_exp) - c3_debit) if c3_fire else 0.0
+    pnl_c4 = (intrinsic_put(c4_strike, S_exp) - c4_debit) if c4_fire else 0.0
 
     return {
         "ticker": ticker,
@@ -204,10 +242,16 @@ def simulate_cycle(slice_by_day, available_days, entry_date, expiration,
         "c3_debit": float(c3_debit),
         "pnl_put_c3": float(pnl_c3),
         "pnl_combined_c3": float(pnl_zebra + pnl_c3),
+
+        "c4_fired": c4_fire,
+        "c4_debit": float(c4_debit),
+        "pnl_put_c4": float(pnl_c4),
+        "pnl_combined_c4": float(pnl_zebra + pnl_c4),
+        "dgs30_entry": float(dgs30_entry) if dgs30_entry is not None else float("nan"),
     }
 
 
-def simulate_ticker(ticker, term_map, breadth_map):
+def simulate_ticker(ticker, term_map, breadth_map, dgs30_map):
     path = BY_TICKER / f"{ticker}.parquet"
     if not path.exists():
         return []
@@ -249,7 +293,7 @@ def simulate_ticker(ticker, term_map, breadth_map):
         if entry_date is None:
             continue
         s = simulate_cycle(slice_by_day, available_days, entry_date, opex_ts,
-                          ticker, term_map, breadth_map)
+                          ticker, term_map, breadth_map, dgs30_map)
         if s is not None:
             summaries.append(s)
     return summaries
@@ -269,6 +313,7 @@ def report(df):
         ("C1 drawdown -5%",     "pnl_combined_c1",  "c1_fired",  "c1_debit"),
         ("C2 term inversion",   "pnl_combined_c2",  "c2_fired",  "c2_debit"),
         ("C3 breadth diverge",  "pnl_combined_c3",  "c3_fired",  "c3_debit"),
+        ("C4 DGS30 ≥ 5%",       "pnl_combined_c4",  "c4_fired",  "c4_debit"),
     ]
     print()
     for label, col, fircol, costcol in variants:
@@ -291,8 +336,8 @@ def report(df):
         ("2023-2025", range(2023, 2026)),
         ("2024-2026", range(2024, 2027)),
     ]
-    cols = ["pnl_combined_c1", "pnl_combined_c2", "pnl_combined_c3"]
-    headers = ["C1", "C2", "C3"]
+    cols = ["pnl_combined_c1", "pnl_combined_c2", "pnl_combined_c3", "pnl_combined_c4"]
+    headers = ["C1", "C2", "C3", "C4"]
     print("  split        " + "  ".join(f"{h:>7s}" for h in headers))
     pos_count = {c: 0 for c in cols}
     for slabel, yrs in splits:
@@ -331,12 +376,15 @@ def main():
                         format="%(asctime)s %(levelname)s %(message)s")
     log = logging.getLogger("zebra_p2_cond")
     log.info("Phase 2 conditional triggers on tier-1: %s", TIER1)
-    term_map, breadth_map = load_signals()
-    log.info("Loaded %d term-spread + %d breadth observations", len(term_map), len(breadth_map))
+    term_map, breadth_map, dgs30_map = load_signals()
+    log.info("Loaded %d term-spread + %d breadth + %d dgs30 observations",
+             len(term_map), len(breadth_map), len(dgs30_map))
+    if not dgs30_map:
+        log.warning("DGS30 map empty — C4 will record zero fires. Check Agent_Project ChromaDB.")
 
     all_results = []
     for i, t in enumerate(TIER1, 1):
-        s = simulate_ticker(t, term_map, breadth_map)
+        s = simulate_ticker(t, term_map, breadth_map, dgs30_map)
         all_results.extend(s)
         log.info("  [%d/%d] %s: %d cycles", i, len(TIER1), t, len(s))
 
