@@ -44,6 +44,7 @@ SECTOR_OVERRIDES: dict[str, str] = {
     "EFA":   ETF_SENTINEL,
     "EEM":   ETF_SENTINEL,
     "SMH":   ETF_SENTINEL,
+    "SOXX":  ETF_SENTINEL,
     "HYG":   ETF_SENTINEL,
     "TLT":   ETF_SENTINEL,
     "TMF":   ETF_SENTINEL,
