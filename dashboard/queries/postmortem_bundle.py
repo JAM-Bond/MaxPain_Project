@@ -295,6 +295,79 @@ def _qualifier_section(opex: str) -> str:
     return "\n".join(lines)
 
 
+def _macro_signature_section(opex: str) -> str:
+    """Per-symbol macro-sensitivity profile for every closed trade in the cycle.
+
+    Surfaces the per-name attributes built by Phase 5 of the macro-sensitivity
+    profile (lib/macro_profile.get) so the AI advisor and human reader have a
+    quantitative macro-context lens on each stop/win — e.g., "WFC stopped on
+    5/12: β_t10yie=-0.06 (use=True), HIKE_2022-regime mean was -0.04 — a
+    regime-consistent inflation-shock loser."
+
+    Caveat: the profile is as-of-current-build (latest rolling β + stability
+    tags). For post-mortems on cycles older than ~30 days the picture may
+    have drifted; the signal is most useful when run right after cycle close.
+    """
+    try:
+        from lib.macro_profile import get as macro_get, load_profile
+    except Exception as e:
+        return f"## Macro signature\n\n_lib.macro_profile not available: {e}_"
+
+    with _conn() as c:
+        df = pd.read_sql_query("""
+            SELECT DISTINCT symbol
+            FROM spread_score_trades
+            WHERE opex_date = ? AND status = 'closed' AND placed = 1
+            ORDER BY symbol
+        """, c, params=(opex,))
+    if df.empty:
+        return "## Macro signature\n\n_No closed placed trades for this OpEx._"
+
+    try:
+        prof = load_profile()
+        as_of = prof["as_of_date"].iloc[0]
+        regime = prof["regime"].iloc[0]
+    except FileNotFoundError:
+        return ("## Macro signature\n\n_macro_profile.parquet not yet built. Run "
+                "`python3.11 scripts/macro/build_macro_profile.py`._")
+
+    lines = [
+        "## Macro signature",
+        "",
+        f"_Profile as-of {as_of.date() if hasattr(as_of, 'date') else as_of}; current regime: **{regime}**._",
+        f"_Caveat: profile reflects most-recent rolling β + Phase-3 stability tags, NOT the β as of the trade date._",
+        "",
+        "| symbol | β_mkt (tier) | β_dgs10 (tier, use) | β_credit (tier, use) | β_t10yie (tier, use) | dollar | oil | vol | r² |",
+        "|---|---|---|---|---|---|---|---|---|",
+    ]
+    for _, r in df.iterrows():
+        sym = r["symbol"]
+        p = macro_get(sym)
+        if p is None:
+            lines.append(f"| {sym} | _not in cohort_ |  |  |  |  |  |  |  |")
+            continue
+        def fmt(beta, tier, use=None):
+            base = f"{beta:+.3f} ({tier}"
+            if use is not None:
+                base += f", use={'✓' if use else '✗'}"
+            return base + ")"
+        lines.append(
+            f"| {sym} | "
+            f"{p['beta_mkt']:+.2f} ({p['beta_mkt_tier']}) | "
+            f"{fmt(p['beta_dgs10'], p['beta_dgs10_tier'], p['beta_dgs10_use'])} | "
+            f"{fmt(p['beta_credit'], p['beta_credit_tier'], p['beta_credit_use'])} | "
+            f"{fmt(p['beta_t10yie'], p['beta_t10yie_tier'], p['beta_t10yie_use'])} | "
+            f"{p['dollar_tier']} | {p['oil_tier']} | {p['vol_tier']} | "
+            f"{p['r2']:.2f} |"
+        )
+    lines.append("")
+    lines.append("**How to read:** `β_*_use = ✓` means Phase 3 stability validation passed and the β is "
+                 "a trustworthy quantitative sizing input. `✗` means the β reverses across rate regimes — "
+                 "use the *tier* (POS_HIGH / NEG_MED / etc.) for directional context only, not for "
+                 "quantitative scaling.")
+    return "\n".join(lines)
+
+
 def compose_bundle(opex: str) -> tuple[str, dict]:
     """Build the full bundle for a given OpEx. Returns (bundle_text, metadata)."""
     closed_text, closed_meta = _closed_trades_section(opex)
@@ -308,6 +381,8 @@ def compose_bundle(opex: str) -> tuple[str, dict]:
         _exit_timing_section(opex),
         "",
         _walkforward_context_section(opex),
+        "",
+        _macro_signature_section(opex),
         "",
         _daily_alerts_section(opex),
         "",

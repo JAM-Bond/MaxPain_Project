@@ -1158,6 +1158,7 @@ def build_construction_enrichment(conn) -> tuple[str, list[str]]:
         build_construction_block, build_zebra_with_overlay_block,
     )
     from scripts.monitor.zebra_overlay_rule import regime_overlay_rule
+    from scripts.qualifier.gate_config import COHORT_ZEBRA_OVERLAY_AUTO
     from lib.sector_map import ETF_SENTINEL, UNKNOWN_SENTINEL
 
     # Compute the overlay rule once per alert run — shared across all ZEBRA
@@ -1169,6 +1170,13 @@ def build_construction_enrichment(conn) -> tuple[str, list[str]]:
     # caps the 3rd+ (SKIP_CONCENTRATION verdict not present in this query);
     # this annotation surfaces the cap-adjacent state to the trader.
     sector_count: dict[tuple[str, str], int] = {}
+
+    # Track every symbol that produces a construction block, so we can run
+    # the macro-concentration check across the whole rendered candidate set
+    # after the loop. This is the macro-band analog of SECTOR-LOAD: surfaces
+    # cross-sector correlation traps that GICS cap misses (BAC+JPM both
+    # POS_MED rate β = unintended same-bet concentration).
+    rendered_symbols: list[str] = []
 
     text_parts = []
     html_parts = []
@@ -1195,6 +1203,7 @@ def build_construction_enrichment(conn) -> tuple[str, list[str]]:
         if not result["ok"]:
             text_parts.append(f"  ⚠ {r['symbol']} {r['structure']}: {result['error']}")
             continue
+        rendered_symbols.append(r["symbol"])
         text_parts.append(result["text"])
         if sector_warning:
             text_parts.append(sector_warning)
@@ -1207,20 +1216,84 @@ def build_construction_enrichment(conn) -> tuple[str, list[str]]:
                 f"{sector_warning.strip()}</div>"
             )
 
-        # For ZEBRA rows, render the regime-conditional overlay variant.
+        # For ZEBRA rows in the validated AUTO-attach cohort, render the
+        # regime-conditional overlay variant. For ZEBRA rows NOT in the AUTO
+        # cohort, surface a one-line note that the overlay is discretionary
+        # only — backtests didn't validate auto-attach for that name.
         # Phase 1+2 validated: matched-expiry long put, strike by regime,
-        # both legs held to OpEx. Replaces the legacy build_zebra_protected
-        # split-expiry construction.
+        # both legs held to OpEx. AUTO cohort sourced from
+        # gate_config.COHORT_ZEBRA_OVERLAY_AUTO (tier-1 + tier-2 per-name).
         if r["structure"].startswith("zebra"):
-            if overlay_rule is None:
-                overlay_rule = regime_overlay_rule()
-            ovl = build_zebra_with_overlay_block(r["symbol"], r["opex"], overlay_rule)
-            if ovl["ok"]:
-                text_parts.append(ovl["text"])
-                text_parts.append("")
-                html_parts.append(ovl["html"])
+            if r["symbol"] in COHORT_ZEBRA_OVERLAY_AUTO:
+                if overlay_rule is None:
+                    overlay_rule = regime_overlay_rule()
+                ovl = build_zebra_with_overlay_block(r["symbol"], r["opex"], overlay_rule)
+                if ovl["ok"]:
+                    text_parts.append(ovl["text"])
+                    text_parts.append("")
+                    html_parts.append(ovl["html"])
+                else:
+                    text_parts.append(f"  ⚠ {r['symbol']} zebra_overlay: {ovl['error']}")
             else:
-                text_parts.append(f"  ⚠ {r['symbol']} zebra_overlay: {ovl['error']}")
+                discretionary_note = (
+                    f"  ℹ {r['symbol']} long-put overlay: discretionary only "
+                    f"(not in COHORT_ZEBRA_OVERLAY_AUTO). Run "
+                    f"`python3.11 -m scripts.monitor.trade_construction "
+                    f"--symbol {r['symbol']} --expiry {r['opex']} --with-overlay` "
+                    f"to render on demand."
+                )
+                text_parts.append(discretionary_note)
+                text_parts.append("")
+                html_parts.append(
+                    f"<div style='font-size:12px;color:#586069;margin:4px 0 12px 0;"
+                    f"padding:6px 10px;background:#f6f8fa;border-left:3px solid #586069'>"
+                    f"<b>{r['symbol']}</b> long-put overlay: discretionary only "
+                    f"(not in <code>COHORT_ZEBRA_OVERLAY_AUTO</code>). "
+                    f"Run <code>python3.11 -m scripts.monitor.trade_construction "
+                    f"--symbol {r['symbol']} --expiry {r['opex']} --with-overlay</code> "
+                    f"to render on demand.</div>"
+                )
+
+    # Macro-band concentration check across the rendered candidate set.
+    # Surfaces correlation traps that the sector cap misses (e.g., XLU+TLT
+    # both NEG_HIGH on β_dgs10 = same rate-defensive bet across sectors).
+    # Only flags when ≥2 candidates share a tier, and only for non-NEUTRAL
+    # tiers. Soft warning — does NOT block the trade.
+    if len(rendered_symbols) >= 2:
+        try:
+            from lib.macro_profile import cohort_macro_concentration
+            dupes = cohort_macro_concentration(rendered_symbols)
+        except FileNotFoundError:
+            dupes = {}  # macro_profile.parquet not yet built — skip silently
+        except Exception as e:
+            dupes = {}
+            text_parts.append(f"  ℹ macro-concentration check failed: {e}")
+        if dupes:
+            text_parts.append("")
+            text_parts.append("─── MACRO CONCENTRATION ───")
+            text_parts.append(
+                "  Soft warning — multiple candidates share a macro-sensitivity tier."
+            )
+            text_parts.append(
+                "  Cross-sector correlation that GICS cap doesn't catch."
+            )
+            html_block = [
+                "<div style='font-size:12px;color:#586069;margin:12px 0 4px 0;"
+                "padding:6px 10px;background:#f6f8fa;border-left:3px solid #586069'>"
+                "<b>MACRO CONCENTRATION</b> — multiple candidates share a macro tier "
+                "(cross-sector correlation GICS cap misses).<ul style='margin:4px 0 0 0;padding-left:20px'>"
+            ]
+            for dim, dupes_for_dim in dupes.items():
+                for tier_label, tickers in dupes_for_dim.items():
+                    text_parts.append(
+                        f"  ⚠ {dim} {tier_label}: {len(tickers)} names — {', '.join(tickers)}"
+                    )
+                    html_block.append(
+                        f"<li><code>{dim}</code> <b>{tier_label}</b>: "
+                        f"{len(tickers)} names — {', '.join(tickers)}</li>"
+                    )
+            html_block.append("</ul></div>")
+            html_parts.append("".join(html_block))
 
     return "\n".join(text_parts), html_parts
 
@@ -1367,6 +1440,28 @@ def main():
                 print(line)
     except Exception as e:
         print(f"\n  MACRO BRIEF — unavailable ({e.__class__.__name__}: {e})")
+
+    # AI Pre-Cycle Commentary annotation (Phase 2). If today's 9:30 ET cron
+    # produced a fresh commentary, surface a short summary here. Soft-fail.
+    try:
+        from datetime import date as _date
+        from lib.ai_pre_cycle_commentary import get_latest_cached
+        latest = get_latest_cached(_date.today().isoformat())
+        if latest and latest.get("response_text"):
+            print(f"\n  AI PRE-CYCLE COMMENTARY  (run_date {latest['run_date']}, "
+                  f"prompt {latest.get('prompt_version', '?')})")
+            print(f"  {'-'*68}")
+            txt = latest["response_text"].strip()
+            if len(txt) > 500:
+                snippet = txt[:500].rsplit(" ", 1)[0] + "…"
+                print(f"  {snippet}")
+                print(f"  (full text on dashboard page 8 — "
+                      f"in={latest['input_tokens']:,} out={latest['output_tokens']:,})")
+            else:
+                for line in txt.split("\n"):
+                    print(f"  {line}")
+    except Exception as e:
+        print(f"\n  PRE-CYCLE COMMENTARY — unavailable ({e.__class__.__name__}: {e})")
 
     # Open-trade section
     print("\n  OPEN TRADES")
