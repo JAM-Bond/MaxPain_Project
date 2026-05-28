@@ -139,11 +139,16 @@ def add_regime_context(events: pd.DataFrame, macro_join: pd.DataFrame) -> pd.Dat
         return "holding"
     out["rate_trend_pre"] = out["dff_delta_180d"].apply(rate_trend_at)
 
-    # "Pivot" flag — first action of opposite direction after at least 180d of
-    # the opposite trend
+    # "Pivot" flag — first action whose direction is opposite of the most recent
+    # prior action. v2 fix: the v1 logic relied on a 180d DFF-delta which missed
+    # the Sep-2024 cut (DFF had held flat at peak 5.33 for 6 months prior, so
+    # the 180d delta was ~0). Using "prior action direction" instead is robust
+    # to flat-plateau pivots and captures every real pivot in the sample.
+    out = out.sort_values("meeting_date").reset_index(drop=True)
+    out["prev_action"] = out["action"].shift(1)
     out["is_pivot"] = (
-        ((out["action"] == "cut")  & (out["rate_trend_pre"] == "hiking")) |
-        ((out["action"] == "hike") & (out["rate_trend_pre"] == "cutting"))
+        ((out["action"] == "cut")  & (out["prev_action"] == "hike")) |
+        ((out["action"] == "hike") & (out["prev_action"] == "cut"))
     )
 
     # SPY-in-drawdown flag at time of action (more than -5% from 252d high)
