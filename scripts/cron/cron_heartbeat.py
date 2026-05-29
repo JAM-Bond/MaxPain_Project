@@ -76,17 +76,23 @@ def ping_deadman() -> None:
 # (job_key, human label, HH, MM). job_key must match the name passed to
 # run_cron.sh. Non-daily jobs (e.g. quarterly_cohort_refresh) are excluded.
 EXPECTED_DAILY = [
+    ("agent_backup",             "Agent ChromaDB backup",     3,  0),
     ("schwab_health_agent",      "Schwab health (Agent)",     7, 55),
     ("schwab_health",            "Schwab health (MaxPain)",   8,  0),
     ("backup_db",                "DB backup",                 8, 45),
     ("agent_fred",               "FRED scraper",              9,  0),
-    ("agent_bls",                "BLS scraper",               9,  0),
+    ("agent_bls",                "BLS scraper",               9,  2),
     ("agent_yieldcurve",         "Yield-curve scraper",       9,  5),
     ("research_cohort",          "Research cohort snapshot",  9, 20),
     ("refresh_earnings",         "Earnings calendar refresh", 9, 22),
     ("qualifier",                "Cycle qualifier",           9, 25),
+    ("agent_order_sync",         "Schwab order sync",         9, 30),
     ("pre_cycle_commentary",     "Pre-cycle commentary",      9, 30),
     ("orats_health",             "ORATS health check",       10,  0),
+    ("agent_cd_maturity",        "CD maturity processor",    12,  0),
+    ("agent_tbill_maturity",     "T-bill maturity processor",12,  5),
+    ("agent_fedrss",             "Fed RSS scraper",          13, 10),
+    ("agent_postmortem",         "Agent post-mortem",        14,  0),
     ("close_prices",             "Close-price update",       16, 16),
     ("mark_open_spreads",        "Mark open spreads",        16, 20),
     ("reconcile_qualifier",      "Qualifier reconcile",      16, 25),
@@ -96,6 +102,9 @@ EXPECTED_DAILY = [
     ("auto_promotion_liquidity", "Auto-promotion liquidity", 22, 30),
     ("auto_promotion_nightly",   "Auto-promotion nightly",   22, 35),
 ]
+# NOTE: agent_fomc (Wed/Thu 18:15 only) is intentionally NOT listed — the
+# weekday most_recent_occurrence logic would false-flag it on Mon/Tue/Fri.
+# It still gets per-run failure alerts via run_cron.sh, just no no-show check.
 
 
 def read_status(job: str) -> tuple[int | None, datetime | None]:

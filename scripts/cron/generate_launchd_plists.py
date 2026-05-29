@@ -72,10 +72,28 @@ QUARTERLY_JOBS = [
 # (job_key, hour, minute, command, log_path)
 AGENT_DIR = Path.home() / "Agent_Project"
 AGENT_LOG = AGENT_DIR / "logs/scrapers"
+# Staggered to avoid concurrent ChromaDB writes: fred 09:00 -> bls 09:02 ->
+# yieldcurve 09:05 (yieldcurve also depends on fred's output, so it must run last).
 AGENT_SCRAPERS = [
     ("agent_fred",       9, 0, f"cd {AGENT_DIR} && {PY} FRED/scraper.py",       f"{AGENT_LOG}/fred.log"),
-    ("agent_bls",        9, 0, f"cd {AGENT_DIR} && {PY} BLS/scraper.py",        f"{AGENT_LOG}/bls.log"),
+    ("agent_bls",        9, 2, f"cd {AGENT_DIR} && {PY} BLS/scraper.py",        f"{AGENT_LOG}/bls.log"),
     ("agent_yieldcurve", 9, 5, f"cd {AGENT_DIR} && {PY} YieldCurve/scraper.py", f"{AGENT_LOG}/yieldcurve.log"),
+]
+
+# Other Agent_Project scheduled agents — brought under run_cron.sh for
+# monitoring. Schedules PRESERVED exactly from their original plists (most run
+# EVERY day, not weekday-only; fomc is Wed/Thu). The `echo started/finished`
+# wrappers are dropped (run_cron.sh adds its own banners). Regenerating also
+# fixes raw-'&' XML that plutil rejected in several originals.
+# (job_key, label_suffix, command, log_filename, intervals, extra_env)
+AGENT_JOBS = [
+    ("agent_backup",         "backup",         f"cd {AGENT_DIR} && {PY} backup_collections.py",            "backup.log",         [{"Hour": 3,  "Minute": 0}],  None),
+    ("agent_order_sync",     "order_sync",     f"cd {AGENT_DIR} && {PY} Schwab/order_sync.py --days 7",    "order_sync.log",     [{"Hour": 9,  "Minute": 30}], None),
+    ("agent_cd_maturity",    "cd.maturity",    f"cd {AGENT_DIR} && {PY} BrokeredCDs/maturity_processor.py","cd_maturity.log",    [{"Hour": 12, "Minute": 0}],  None),
+    ("agent_tbill_maturity", "tbill.maturity", f"cd {AGENT_DIR} && {PY} TBills/maturity_processor.py",     "tbill_maturity.log", [{"Hour": 12, "Minute": 5}],  None),
+    ("agent_fedrss",         "fedrss",         f"cd {AGENT_DIR} && {PY} FederalReserve/scraper.py",        "fedrss.log",         [{"Hour": 13, "Minute": 10}], None),
+    ("agent_postmortem",     "postmortem",     f"cd {AGENT_DIR} && PYTHONPATH={AGENT_DIR} {PY} PostMortem/runner.py", "postmortem.log", [{"Hour": 14, "Minute": 0}], None),
+    ("agent_fomc",           "fomc",           f"cd {AGENT_DIR} && {PY} FederalReserve/fomc_scraper.py",   "fomc.log",           [{"Weekday": 3, "Hour": 18, "Minute": 15}, {"Weekday": 4, "Hour": 18, "Minute": 15}], None),
 ]
 
 
@@ -86,8 +104,11 @@ def weekday_intervals(hour: int, minute: int) -> list[dict]:
 
 def build(job: str, intervals: list[dict], command: str,
           *, label: str | None = None, log: str | None = None,
-          workdir: str | None = None) -> dict:
+          workdir: str | None = None, env: dict | None = None) -> dict:
     log = log or f"{ML}/{_logname(job)}"
+    envvars = {"PATH": PATH_ENV}
+    if env:
+        envvars.update(env)
     return {
         "Label": label or f"com.maxpain.{job}",
         "ProgramArguments": ["/bin/bash", RUN_CRON, job, log, command],
@@ -95,7 +116,7 @@ def build(job: str, intervals: list[dict], command: str,
         "StandardOutPath": log,
         "StandardErrorPath": log,
         "WorkingDirectory": workdir or str(ROOT),
-        "EnvironmentVariables": {"PATH": PATH_ENV},
+        "EnvironmentVariables": envvars,
     }
 
 
@@ -131,6 +152,16 @@ def main() -> None:
         label = f"com.agentproject.{job.removeprefix('agent_')}"
         d = build(job, weekday_intervals(hh, mm), cmd,
                   label=label, log=log, workdir=str(AGENT_DIR))
+        p = OUT_DIR / f"{label}.plist"
+        with open(p, "wb") as f:
+            plistlib.dump(d, f)
+        written.append(p.name)
+
+    for job, suffix, cmd, logfile, intervals, env in AGENT_JOBS:
+        label = f"com.agentproject.{suffix}"
+        log = f"{AGENT_LOG}/{logfile}"
+        d = build(job, intervals, cmd,
+                  label=label, log=log, workdir=str(AGENT_DIR), env=env)
         p = OUT_DIR / f"{label}.plist"
         with open(p, "wb") as f:
             plistlib.dump(d, f)
