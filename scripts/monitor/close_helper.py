@@ -328,12 +328,16 @@ def build_close_candidates_rollup(
     conn: sqlite3.Connection,
     today_iso: str,
 ) -> dict:
-    """Synthesize 50%-profit, T-21, and regime-🔴 cues into one action rollup.
+    """Synthesize 50%-profit, T-21, and stressed-position cues into one
+    action rollup.
 
     A row becomes a "close candidate" if any of:
       💰 PROFIT  — capture_at_mid ≥ 0.50  (50%-rule fired)
       ⏰ TIME    — DTE ≤ 21               (T-21 management hit)
-      🔴 REGIME  — combined_status today is 🔴
+      🔴 STRESS  — combined_status today is 🔴 AND capture_at_mid < 0
+                  (underwater AND regime stressed; profitable positions
+                  never fire this cue — the entry gate being off is not
+                  a management signal for an open trade)
     Multiple cues stack visually. Returns {text, html} — both empty if no
     candidates today.
     """
@@ -346,8 +350,8 @@ def build_close_candidates_rollup(
             cues.append(("💰", "50%+ profit"))
         if dte is not None and dte <= 21:
             cues.append(("⏰", f"T-21 hit (DTE {dte})"))
-        if statuses.get(r.id) == "🔴":
-            cues.append(("🔴", "regime 🔴"))
+        if statuses.get(r.id) == "🔴" and r.capture_at_mid < 0:
+            cues.append(("🔴", f"underwater + regime 🔴 (cap {r.capture_at_mid*100:+.0f}%)"))
         if cues:
             candidates.append((r, dte, cues))
 
