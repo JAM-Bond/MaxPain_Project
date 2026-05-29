@@ -354,8 +354,10 @@ def main() -> int:
             subj = _make_subject(run_date, 0, 0, 0, failed=True)
             body = f"Auto-promotion nightly cron FAILED.\n\n{tb}"
             send_html_alert(subj, body, f"<pre>{body}</pre>")
-        # Exit 0 so cron doesn't retry — failure is reported by email
-        return 0
+        # Exit non-zero so run_cron.sh traps this as a backstop (it emails the
+        # log tail). cron does not auto-retry on non-zero, so this is safe — and
+        # it covers the case where the email send above itself failed.
+        return 1
 
 
 def _run(args, run_date: date, snapshot_date: date | None, t0: float) -> int:

@@ -1657,20 +1657,29 @@ def main():
         return
 
     # Email — skip on --no-email or on truly quiet days (don't spam inbox).
+    email_ok = True
     if not args.no_email and not quiet:
         try:
             from lib.email_alert import send_html_alert
-            send_html_alert(subject, text_body, html_body)
+            email_ok = send_html_alert(subject, text_body, html_body)
         except Exception as e:
             print(f"  email send raised: {e}")
+            email_ok = False
 
     # Persist — always (except dry-run above). Quiet days are still useful in
     # the archive: "no events that day" is itself a state worth preserving for
-    # post-mortem reconstruction.
+    # post-mortem reconstruction. Persist even if the email failed.
     try:
         _persist_run(subject, text_body, html_body, n_constructions, has_events)
     except Exception as e:
         print(f"  persist failed: {e}")
+
+    # A daily alert that silently failed to SEND is itself a silent failure —
+    # surface it so run_cron.sh traps and re-alerts. send_html_alert returns
+    # False on SMTP/config error (it never raises).
+    if not email_ok:
+        print("  ✗ daily alert email did NOT send — exiting 1 so cron traps it.")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

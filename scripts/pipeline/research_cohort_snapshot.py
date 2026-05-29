@@ -343,6 +343,13 @@ def main() -> None:
         print(f"  ✓ regime_state updated  (stage={regime['stage']})")
     print(f"✓ Snapshot complete — {len(snaps)}/{len(cohort)} symbols captured.\n")
 
+    # Trap silent failure: cohort non-empty but every snapshot failed (chain
+    # endpoint down) — exit non-zero so run_cron alerts rather than leaving the
+    # qualifier to run on stale max_pain.
+    if not args.regime_only and cohort and not snaps:
+        print("✗ 0 snapshots captured — exiting 1 so cron traps it.")
+        sys.exit(1)
+
 
 if __name__ == "__main__":
     main()

@@ -144,9 +144,15 @@ def main():
     if still_missing:
         print(f"  WARNING: no quote for {', '.join(still_missing)}")
 
+    # Trap silent failure: a data outage that drops most quotes would leave the
+    # 4:45 alert running on stale prices. Exit non-zero so run_cron alerts.
     if not prices:
-        print("No prices fetched; aborting update.")
-        return
+        print("✗ No prices fetched — exiting 1 so cron traps it.")
+        sys.exit(1)
+    if len(still_missing) > len(symbols) // 2:
+        print(f"✗ {len(still_missing)}/{len(symbols)} symbols missing quotes "
+              f"(>50%) — likely a data outage. Exiting 1 so cron traps it.")
+        sys.exit(1)
 
     n = update_prices(prices, today_str, dry_run=args.dry_run)
     status = "DRY RUN" if args.dry_run else "DONE"
