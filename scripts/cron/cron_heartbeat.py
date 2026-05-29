@@ -40,11 +40,37 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import urllib.request
+
 sys.path.insert(0, str(Path.home() / "MaxPain_Project"))
-from lib.email_alert import send_html_alert  # noqa: E402
+from lib.email_alert import send_html_alert, _load_env  # noqa: E402
 
 ROOT = Path.home() / "MaxPain_Project"
 STATUS_DIR = ROOT / "logs" / "cron_status"
+
+
+def ping_deadman() -> None:
+    """Ping the external dead-man's-switch so it stays satisfied.
+
+    The heartbeat running at all proves the machine is awake and cron is
+    firing. If this ping STOPS arriving on schedule (machine asleep/off, crond
+    dead), the external service (healthchecks.io) alerts you — the one failure
+    mode an on-box monitor cannot self-report, because it's down too.
+
+    Configured via HEALTHCHECK_PING_URL in config/api_keys.env; no-op if unset,
+    so it's safe to ship before the URL exists.
+    """
+    url = _load_env().get("HEALTHCHECK_PING_URL", "").strip()
+    if not url:
+        print("dead-man's-switch: HEALTHCHECK_PING_URL not set — external alerting disabled")
+        return
+    try:
+        with urllib.request.urlopen(url, timeout=10) as r:
+            print(f"dead-man's-switch: pinged OK ({r.status})")
+    except Exception as e:
+        # A failed ping must not break the heartbeat — and its absence is
+        # exactly what the external service is watching for, so this is benign.
+        print(f"dead-man's-switch: ping failed (external service will notice): {e}")
 
 # Jobs expected every weekday (Mon–Fri), ordered by schedule.
 # (job_key, human label, HH, MM). job_key must match the name passed to
@@ -134,6 +160,11 @@ def main() -> int:
     print(f"cron heartbeat @ {now:%Y-%m-%d %H:%M}: {n_ok}/{len(rows)} OK, {len(problems)} problem(s)")
     for key, label, sched, state, detail in rows:
         print(f"  {icon[state]} {state:7s} {sched} {label} — {detail}")
+
+    # External dead-man's-switch: pinging proves machine + cron are alive.
+    # Skip under --no-email (manual inspection) so it doesn't reset the timer.
+    if not args.no_email:
+        ping_deadman()
 
     if args.no_email:
         return 0
