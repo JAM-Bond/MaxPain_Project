@@ -1543,6 +1543,19 @@ def main():
     except Exception as e:
         print(f"  ⚠ regime health persistence failed: {e}")
 
+    # PSYCH-GAP-LOG PROMPTS (SEP-live transition checklist item 1)
+    # Surfaces open positions newly at 🟡/🔴 since last log entry so the
+    # user is reminded to report a "would I close this in live?" judgment.
+    psych_gap_text = ""
+    try:
+        from lib.psych_gap_log import pending_prompts, render_prompts_text
+        gap_prompts = pending_prompts(date.today().isoformat(), conn=conn)
+        psych_gap_text = render_prompts_text(gap_prompts)
+        if psych_gap_text:
+            print(psych_gap_text)
+    except Exception as e:
+        print(f"  ⚠ psych-gap-log prompt failed: {e}")
+
     # Open-position close marks (live mid/natural/limit + capture %)
     # Sourced from scripts/monitor/close_helper.py — same module the user runs
     # ad-hoc via CLI. Embedding here surfaces 50%-capture and >25% candidates
@@ -1581,7 +1594,7 @@ def main():
             and not exdiv_events and not actionable_earnings
             and not extreme_events and not if_candidates and not dte_events
             and not zebra_earnings_events and not regime_health_lines
-            and not construction_text):
+            and not psych_gap_text and not construction_text):
         print(f"\n  ✓ All quiet — no alerts.")
 
     if construction_text:
