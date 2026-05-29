@@ -100,7 +100,12 @@ def main() -> int:
             subject=f"MaxPain ORATS Health — CRITICAL ({today.isoformat()})",
             text_body=msg,
         )
-        return 2
+        # Self-alerting monitor: we have already emailed the operator a precise
+        # message, so exit clean. A non-zero exit here would make run_cron.sh
+        # fire a *second*, generic "CRON FAILED" email on top of ours. Reserve
+        # non-zero exit for genuine unexpected crashes (uncaught exceptions),
+        # which run_cron.sh still traps.
+        return 0
 
     expected = previous_business_day(today)
     gap_days = (expected - latest).days
@@ -138,7 +143,10 @@ def main() -> int:
         text_body=text_body,
         html_body=html_body,
     )
-    return 1
+    # Self-alerting monitor — the STALE email above IS the signal. Exit clean
+    # so run_cron.sh doesn't double-fire a generic "CRON FAILED" alert. (See the
+    # CRITICAL path above for the full rationale.)
+    return 0
 
 
 if __name__ == "__main__":

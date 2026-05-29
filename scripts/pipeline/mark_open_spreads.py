@@ -209,7 +209,7 @@ def main() -> int:
         # Trap silent failure: open trades existed but EVERY chain fetch failed
         # (Schwab outage) — exit non-zero so run_cron alerts. Otherwise the
         # daily alert silently shows no marks with no indication why.
-        if trades and n_ok == 0:
+        if len(trades) and n_ok == 0:
             print("  ✗ all marks failed — exiting 1 so cron traps it.")
             return 1
         return 0
