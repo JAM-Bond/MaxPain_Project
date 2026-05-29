@@ -42,6 +42,9 @@ UNIVERSE_V1 = ROOT / "data/profile/universe_v1.parquet"
 UNIVERSE_V2 = ROOT / "data/profile/universe_v2_liquidity_pool.parquet"
 OUT_PATH = ROOT / "data/macro/prices_daily_13y.parquet"
 
+sys.path.insert(0, str(ROOT))
+from lib.adjusted_close import load_adjusted_close  # noqa: E402
+
 
 def load_cohort_union() -> set[str]:
     """Union of every COHORT_* list in scripts/qualifier/gate_config.py."""
@@ -75,9 +78,13 @@ def extract_one(ticker: str) -> pd.DataFrame | None:
     path = BY_TICKER / f"{ticker}.parquet"
     if not path.exists():
         return None
-    df = pd.read_parquet(path, columns=["trade_date", "stkPx"])
-    df = df.drop_duplicates(subset=["trade_date"]).sort_values("trade_date")
-    df = df.rename(columns={"trade_date": "date", "stkPx": "close"})
+    # Split-adjusted close — raw ORATS stkPx is unadjusted for splits, which
+    # corrupts the rolling betas over any 252d window spanning a split. See
+    # lib/adjusted_close. (Option backtests stay on the raw archive.)
+    s = load_adjusted_close(ticker)
+    if s.empty:
+        return None
+    df = s.rename("close").reset_index().rename(columns={"trade_date": "date"})
     df["date"] = pd.to_datetime(df["date"])
     df["ticker"] = ticker
 
@@ -86,6 +93,14 @@ def extract_one(ticker: str) -> pd.DataFrame | None:
     df["log_ret_5d"]  = df["log_close"].diff(5)
     df["log_ret_20d"] = df["log_close"].diff(20)
     df = df.drop(columns=["log_close"])
+
+    # Backstop: any residual single-day move > ~123% (|log|>0.80, i.e. price
+    # >2.2x or <0.45x in a day) that survived split-adjustment is a data
+    # artifact (missed/large split, merger, ticker change, IPO first-print) —
+    # no real equity moves that much. NaN it so it can't poison the betas
+    # (which regress on 1d returns). See lib/adjusted_close for the split layer.
+    bad = df["log_ret_1d"].abs() > 0.80
+    df.loc[bad, ["log_ret_1d", "log_ret_5d", "log_ret_20d"]] = np.nan
     return df[["date", "ticker", "close", "log_ret_1d", "log_ret_5d", "log_ret_20d"]]
 
 
