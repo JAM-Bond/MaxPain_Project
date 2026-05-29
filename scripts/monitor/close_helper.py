@@ -309,6 +309,96 @@ def _t21_band(dte: Optional[int]) -> tuple[str, str]:
     return ("🔴", f"T-21 hit ({21 - dte}d past) — close/roll now")
 
 
+def _today_position_status(conn: sqlite3.Connection,
+                            today_iso: str) -> dict[int, str]:
+    """Map trade_id → combined_status from today's position_health_snapshots."""
+    try:
+        rows = conn.execute(
+            "SELECT trade_id, combined_status FROM position_health_snapshots "
+            "WHERE snapshot_date = ?",
+            (today_iso,),
+        ).fetchall()
+    except Exception:
+        return {}
+    return {int(r[0]): (r[1] or "") for r in rows}
+
+
+def build_close_candidates_rollup(
+    rows: list[CloseRow],
+    conn: sqlite3.Connection,
+    today_iso: str,
+) -> dict:
+    """Synthesize 50%-profit, T-21, and regime-🔴 cues into one action rollup.
+
+    A row becomes a "close candidate" if any of:
+      💰 PROFIT  — capture_at_mid ≥ 0.50  (50%-rule fired)
+      ⏰ TIME    — DTE ≤ 21               (T-21 management hit)
+      🔴 REGIME  — combined_status today is 🔴
+    Multiple cues stack visually. Returns {text, html} — both empty if no
+    candidates today.
+    """
+    statuses = _today_position_status(conn, today_iso)
+    candidates = []
+    for r in rows:
+        dte = _dte_for(r.opex_date)
+        cues = []
+        if r.capture_at_mid >= 0.50:
+            cues.append(("💰", "50%+ profit"))
+        if dte is not None and dte <= 21:
+            cues.append(("⏰", f"T-21 hit (DTE {dte})"))
+        if statuses.get(r.id) == "🔴":
+            cues.append(("🔴", "regime 🔴"))
+        if cues:
+            candidates.append((r, dte, cues))
+
+    if not candidates:
+        return {"text": "", "html": ""}
+
+    # Text rendering
+    lines = ["  CLOSE CANDIDATES TODAY",
+             "  " + "-" * 68]
+    for r, dte, cues in candidates:
+        badge = "".join(c[0] for c in cues)
+        reasons = " + ".join(c[1] for c in cues)
+        strikes = f"{r.short_strike:g}/{r.long_strike:g}"
+        cap_pct = f"cap {r.capture_at_mid*100:+.0f}%"
+        dte_str = f"DTE {dte}" if dte is not None else "DTE ?"
+        lines.append(
+            f"  {badge:<4} {r.symbol:<6} {r.spread_type:<14} "
+            f"{strikes:>11}  {dte_str:>7}  {cap_pct:>9}  — {reasons}"
+        )
+    text = "\n".join(lines)
+
+    # HTML rendering
+    rows_html = []
+    for r, dte, cues in candidates:
+        badge = "".join(c[0] for c in cues)
+        reasons = " + ".join(c[1] for c in cues)
+        strikes = f"{r.short_strike:g}/{r.long_strike:g}"
+        cap_pct = f"{r.capture_at_mid*100:+.0f}%"
+        dte_str = f"DTE {dte}" if dte is not None else "DTE ?"
+        rows_html.append(
+            f"<tr>"
+            f"<td style='padding:2px 8px;font-size:14px'>{badge}</td>"
+            f"<td style='padding:2px 8px'><b>{r.symbol}</b></td>"
+            f"<td style='padding:2px 8px'>{r.spread_type}</td>"
+            f"<td style='padding:2px 8px'>{strikes}</td>"
+            f"<td style='padding:2px 8px;text-align:center'>{dte_str}</td>"
+            f"<td style='padding:2px 8px;text-align:right'>{cap_pct}</td>"
+            f"<td style='padding:2px 8px;color:#a00'>{reasons}</td>"
+            f"</tr>"
+        )
+    html = (
+        "<div style='font-family:Menlo,Consolas,monospace;font-size:13px;"
+        "margin:10px 0;padding:8px;border:1px solid #d0a020;background:#fff8e1'>"
+        "<div style='font-weight:bold;margin-bottom:6px;color:#a86200'>"
+        "CLOSE CANDIDATES TODAY</div>"
+        "<table style='border-collapse:collapse;font-size:12px'>"
+        f"<tbody>{''.join(rows_html)}</tbody></table></div>"
+    )
+    return {"text": text, "html": html}
+
+
 def _t21_actions(rows: list[CloseRow]) -> list[tuple[CloseRow, int, str, str]]:
     """Subset of rows where T-21 is approaching or past. Sorted DTE asc
     (most-urgent first). Excludes long_put (single-leg debit, no roll cue)

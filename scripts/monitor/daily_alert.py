@@ -1577,10 +1577,21 @@ def main():
     # at alert time, including the natural-vs-mid gap that flagged GS this week.
     close_text = ""
     try:
-        from scripts.monitor.close_helper import build_close_block
+        from scripts.monitor.close_helper import (
+            build_close_block, build_close_candidates_rollup,
+        )
         close_block = build_close_block()
         close_text = close_block.get("text", "")
         close_errors = close_block.get("errors", [])
+        # CLOSE CANDIDATES TODAY rollup — synthesizes 50%-profit, T-21, and
+        # regime-🔴 cues into one action summary, printed BEFORE the detail
+        # table so the user sees actionable items first.
+        cand = build_close_candidates_rollup(
+            close_block.get("rows", []), conn, date.today().isoformat()
+        )
+        if cand.get("text"):
+            print()
+            print(cand["text"])
         if close_text and close_text != "No open placed positions.":
             print()
             print(close_text)
