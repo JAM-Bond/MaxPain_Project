@@ -43,7 +43,7 @@ EARNINGS_CACHE = ROOT / "data/profile/earnings_calendar_cache.parquet"
 # Enrichment imports (lazy: only on construction blocks path)
 sys.path.insert(0, str(ROOT))
 
-from lib.db import DB_PATH  # noqa: E402
+from lib.db import DB_PATH, connect  # noqa: E402
 
 logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(message)s")
 log = logging.getLogger("alert")
@@ -1357,7 +1357,7 @@ def _persist_run(subject: str, text_body: str, html_body: str,
     INSERT OR REPLACE so the latest run wins). Used by the dashboard's Daily
     Alert page for browsable history + post-mortem reconstruction."""
     import sqlite3
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = connect()
     conn.execute("""
         CREATE TABLE IF NOT EXISTS daily_alert_runs (
             run_date TEXT PRIMARY KEY,
@@ -1416,7 +1416,7 @@ def main():
     _real_stdout = sys.stdout
     sys.stdout = _Tee(_real_stdout, buf)
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = connect()
 
     print(f"\n{'='*72}")
     print(f"  MaxPain Daily Alert — {datetime.now().strftime('%Y-%m-%d %H:%M')}")

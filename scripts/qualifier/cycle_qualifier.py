@@ -36,7 +36,7 @@ import pandas as pd
 import requests
 
 sys.path.insert(0, str(Path.home() / "MaxPain_Project"))
-from lib.db import DB_PATH  # noqa: E402
+from lib.db import DB_PATH, connect  # noqa: E402
 from lib.opex_calendar import (  # noqa: E402
     current_opex, next_n_opexes, trading_day_offset, trading_days_between,
     calendar_days_before,
@@ -171,7 +171,7 @@ def fetch_schwab_spots(symbols: list[str]) -> dict[str, float]:
 
 def load_regime_state(run_date: date) -> dict | None:
     """Most recent regime_state row on or before run_date. Returns dict or None."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = connect()
     try:
         cur = conn.execute(
             "SELECT * FROM regime_state WHERE snapshot_date <= ? "
@@ -828,7 +828,7 @@ def write_qualifier_runs(rows: list[dict], regime: dict, run_date: date,
     """Persist verdict rows to cycle_qualifier_runs in maxpain.db."""
     if not rows or dry_run:
         return 0
-    conn = sqlite3.connect(DB_PATH)
+    conn = connect()
     cur = conn.cursor()
     cur.execute("""
         CREATE TABLE IF NOT EXISTS cycle_qualifier_runs (

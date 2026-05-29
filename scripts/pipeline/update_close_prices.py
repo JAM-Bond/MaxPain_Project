@@ -34,7 +34,7 @@ from datetime import date
 from pathlib import Path
 
 sys.path.insert(0, str(Path.home() / "MaxPain_Project"))
-from lib.db import DB_PATH  # noqa: E402
+from lib.db import DB_PATH, connect  # noqa: E402
 from lib.schwab_quotes import fetch_quotes  # noqa: E402
 
 try:
@@ -72,7 +72,7 @@ def update_prices(prices: dict[str, float], date_str: str, dry_run: bool = False
 
     Returns count of rows actually updated.
     """
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = connect()
     updated = 0
     for sym, price in prices.items():
         row = conn.execute(

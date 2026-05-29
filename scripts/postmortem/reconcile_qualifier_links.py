@@ -13,11 +13,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path.home() / "MaxPain_Project"))
 
-from lib.db import DB_PATH  # noqa: E402
+from lib.db import DB_PATH, connect  # noqa: E402
 
 
 def main(dry_run: bool) -> int:
-    conn = sqlite3.connect(DB_PATH)
+    conn = connect()
     conn.row_factory = sqlite3.Row
     cur = conn.cursor()
 

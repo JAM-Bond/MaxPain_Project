@@ -25,14 +25,14 @@ COHORT_PARQUET = ROOT / "data/profile/research_cohort_v15.parquet"
 
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "scripts"))
-from lib.db import DB_PATH  # noqa: E402
+from lib.db import DB_PATH, connect  # noqa: E402
 from qualifier.earnings_calendar import load_earnings_calendar  # noqa: E402
 
 
 def collect_symbols() -> list[str]:
     syms: set[str] = set()
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = connect()
     try:
         rows = conn.execute(
             "SELECT DISTINCT symbol FROM spread_score_trades WHERE status='open'"

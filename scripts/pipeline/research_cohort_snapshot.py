@@ -36,7 +36,7 @@ from pathlib import Path
 import pandas as pd
 
 sys.path.insert(0, str(Path.home() / "MaxPain_Project"))
-from lib.db import DB_PATH  # noqa: E402
+from lib.db import DB_PATH, connect  # noqa: E402
 from lib.snapshot import take_snapshot, current_opex  # noqa: E402
 
 ROOT = Path.home() / "MaxPain_Project"
@@ -74,7 +74,7 @@ def load_cohort() -> list[str]:
 def write_snapshots(snaps: list[dict]) -> int:
     if not snaps:
         return 0
-    conn = sqlite3.connect(DB_PATH)
+    conn = connect()
     cur = conn.cursor()
     placeholders = ", ".join(["?"] * len(COLUMNS))
     col_list = ", ".join(COLUMNS)
@@ -242,7 +242,7 @@ REGIME_COLUMNS = [
 def write_regime_state(state: dict) -> None:
     if state is None:
         return
-    conn = sqlite3.connect(DB_PATH)
+    conn = connect()
     cur = conn.cursor()
     cur.execute("""
         CREATE TABLE IF NOT EXISTS regime_state (

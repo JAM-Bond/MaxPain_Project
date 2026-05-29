@@ -40,7 +40,7 @@ import pandas as pd
 ROOT = Path.home() / "MaxPain_Project"
 sys.path.insert(0, str(ROOT))
 
-from lib.db import DB_PATH  # noqa: E402
+from lib.db import DB_PATH, connect  # noqa: E402
 from lib.schwab_options import fetch_chain_with_greeks  # noqa: E402
 
 # Spread-types that are credit verticals (short - long = positive credit).
@@ -136,7 +136,7 @@ def main() -> int:
 
     mark_date_str = args.mark_date or date.today().isoformat()
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = connect()
     try:
         trades = load_open_credit_verticals(conn, args.symbol)
         if trades.empty:
