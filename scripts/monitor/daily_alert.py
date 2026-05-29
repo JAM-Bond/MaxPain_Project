@@ -1298,9 +1298,24 @@ def build_construction_enrichment(conn) -> tuple[str, list[str]]:
     return "\n".join(text_parts), html_parts
 
 
+def _strip_constructions_for_html(text: str) -> str:
+    """Remove the TRADE CONSTRUCTIONS plain-text block before wrapping in <pre>.
+    The HTML cards rendered below the <pre> are the canonical version; keeping
+    both in the HTML view duplicates. text_body (archive + plain-text fallback)
+    keeps the constructions; only the HTML rendering strips them."""
+    import re
+    return re.sub(
+        r"\n\s*TRADE CONSTRUCTIONS.*?(?=\n\s*=+\s*\n|\Z)",
+        "",
+        text,
+        flags=re.DOTALL,
+    )
+
+
 def build_email_html(text_body: str, construction_cards: list[str]) -> str:
     """Wrap the captured stdout in monospace HTML + append construction cards."""
-    safe_text = (text_body
+    text_for_pre = _strip_constructions_for_html(text_body)
+    safe_text = (text_for_pre
                  .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
     cards_html = "\n".join(construction_cards) if construction_cards else ""
     return f"""<!DOCTYPE html>

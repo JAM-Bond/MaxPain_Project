@@ -183,6 +183,13 @@ def _zebra_metrics(pos, chain=None) -> dict:
         ] + range_block,
         "sizing": "Capital outlay = 5–10% of book equity per ZEBRA position.",
         "liquidity_warning": liq_warn,
+        "compact": {
+            "legs": [("+", long_leg.strike, "CALL", 2),
+                     ("-", short_leg.strike, "CALL", 1)],
+            "entry": f"${debit:.2f} debit",
+            "stop": None,
+            "aside": None,
+        },
     }
 
 
@@ -230,6 +237,13 @@ def _anti_zebra_metrics(pos, chain=None) -> dict:
         ] + range_block,
         "sizing": "Capital outlay = 5–10% of book equity per anti-ZEBRA. H1 gate must be active.",
         "liquidity_warning": liq_warn,
+        "compact": {
+            "legs": [("+", long_leg.strike, "PUT", 2),
+                     ("-", short_leg.strike, "PUT", 1)],
+            "entry": f"${debit:.2f} debit",
+            "stop": None,
+            "aside": None,
+        },
     }
 
 
@@ -291,6 +305,17 @@ def _inverted_fly_metrics(pos, chain=None) -> dict:
         ] + range_block,
         "sizing": "1 contract per intended risk slot (max loss = debit). Plan: 50% mgd-exit on big-move wins.",
         "liquidity_warning": liq_warn,
+        "compact": {
+            "legs": [
+                ("-", short_put_wing.strike, "PUT", 1),
+                ("+", long_put.strike, "PUT", 1),
+                ("+", long_call.strike, "CALL", 1),
+                ("-", short_call_wing.strike, "CALL", 1),
+            ],
+            "entry": f"${debit:.2f} debit",
+            "stop": None,
+            "aside": "build as Iron Condor, then adjust to fly",
+        },
     }
 
 
@@ -379,6 +404,15 @@ def _vertical_metrics(pos, kind: str, chain=None, symbol: str = "") -> dict:
         "sizing": (f"Per loss-cap rule: realized loss ≤ 2× target win. "
                     f"Skip if credit/width < {G.MIN_CREDIT_WIDTH:.2f}."),
         "liquidity_warning": liq_warn,
+        "compact": {
+            "legs": [("-", short_leg.strike, put_or_call, 1),
+                     ("+", long_leg.strike, put_or_call, 1)],
+            "entry": f"${credit:.2f} credit",
+            "stop": (f"STP {stop_trigger:.2f}",
+                     f"LMT {stop_limit:.2f}",
+                     "MARK GTC"),
+            "aside": None,
+        },
     }
 
 
@@ -398,75 +432,59 @@ def _metrics_for(pos, structure: str, chain=None, symbol: str = "") -> dict:
 
 # ─── Render: text + html ──────────────────────────────────────────────
 
+def _fmt_strike(s: float) -> str:
+    """Whole-dollar strikes drop the .00; fractional strikes show one decimal."""
+    return f"{s:g}"
+
+
+def _fmt_expiry(expiry: str) -> str:
+    """ISO date → 'DD MON YY' (e.g. '2026-07-17' → '17 JUL 26')."""
+    return pd.Timestamp(expiry).strftime("%d %b %y").upper()
+
+
+def _fmt_legs_text(legs: list) -> str:
+    """Compact leg list: '-756 PUT  /  +752 PUT' or with ratios '+280 CALL ×2'."""
+    parts = []
+    for sign, strike, right, qty in legs:
+        leg = f"{sign}{_fmt_strike(strike)} {right}"
+        if qty and qty != 1:
+            leg = f"{leg} ×{qty}"
+        parts.append(leg)
+    return "  /  ".join(parts)
+
+
 def _render_text(symbol: str, structure: str, expiry: str, spot: float, m: dict) -> str:
-    lines = [
-        f"  {m['structure_label']} — {symbol} (spot ${spot:.2f}, expiration {expiry})",
-        "",
-        f"    {'LEG':<18} {'QTY':>4}  {'STRIKE':>7}  {'DELTA':>6}   {'BID':>6}  {'MID':>6}  {'ASK':>6}",
-    ]
-    for leg, qty, strike, delta, bid, mid, ask in m["rows"]:
-        bid_str = f"${bid:>5.2f}" if bid > 0 else "   n/a"
-        ask_str = f"${ask:>5.2f}" if ask > 0 else "   n/a"
-        lines.append(
-            f"    {leg:<18} {qty:>4}  ${strike:>6.2f}  {delta:>+6.2f}   {bid_str:>6}  ${mid:>5.2f}  {ask_str:>6}"
-        )
-    lines.append("")
-    for label, value in m["summary"]:
-        if label.startswith("───"):
-            lines.append(f"    {label}")
-        else:
-            lines.append(f"    {label:<40} {value}")
-    if m.get("liquidity_warning"):
-        lines.append("")
-        lines.append(f"    🚨 {m['liquidity_warning']}")
-    lines.append("")
-    lines.append(f"    Sizing: {m['sizing']}")
+    c = m["compact"]
+    lines = [f"  {symbol}  {structure}  {_fmt_expiry(expiry)}"]
+    if c.get("aside"):
+        lines.append(f"    ({c['aside']})")
+    lines.append(f"    Legs:  {_fmt_legs_text(c['legs'])}")
+    lines.append(f"    Entry: {c['entry']}")
+    if c.get("stop"):
+        stp, lmt, mark = c["stop"]
+        lines.append(f"    Stop:  {stp}  /  {lmt}  ({mark})")
     return "\n".join(lines)
 
 
 def _render_html(symbol: str, structure: str, expiry: str, spot: float, m: dict) -> str:
-    def _fmt_price(p):
-        return f"${p:.2f}" if p > 0 else "n/a"
-    legs_html = "".join(
-        f"<tr><td>{leg}</td><td align=center>{qty}</td>"
-        f"<td align=right>${strike:.2f}</td>"
-        f"<td align=right>{delta:+.2f}</td>"
-        f"<td align=right style='color:#888'>{_fmt_price(bid)}</td>"
-        f"<td align=right><b>${mid:.2f}</b></td>"
-        f"<td align=right style='color:#888'>{_fmt_price(ask)}</td></tr>"
-        for (leg, qty, strike, delta, bid, mid, ask) in m["rows"]
-    )
-    def _fmt_summary_row(label, value):
-        if label.startswith("───"):
-            return (f"<tr><td colspan=2 style='padding-top:6px;color:#666;"
-                    f"font-size:11px;border-top:1px solid #ddd'>{label.replace('───','').strip()}</td></tr>")
-        return f"<tr><td>{label}</td><td>{value}</td></tr>"
-    summary_html = "".join(_fmt_summary_row(l, v) for (l, v) in m["summary"])
-    liq_html = ""
-    if m.get("liquidity_warning"):
-        liq_html = (f"<div style='font-size:12px;color:#a02020;margin-top:6px;"
-                    f"font-weight:bold'>🚨 {m['liquidity_warning']}</div>")
+    c = m["compact"]
+    legs_text = _fmt_legs_text(c["legs"])
+    aside_html = ""
+    if c.get("aside"):
+        aside_html = (f"<div style='color:#888;font-size:12px;margin-bottom:2px'>"
+                      f"({c['aside']})</div>")
+    stop_html = ""
+    if c.get("stop"):
+        stp, lmt, mark = c["stop"]
+        stop_html = (f"<div><b>Stop:</b> &nbsp;{stp} &nbsp;/&nbsp; {lmt} "
+                     f"&nbsp;<span style='color:#888'>({mark})</span></div>")
     return f"""
 <div style="font-family:Menlo,Consolas,monospace;border:1px solid #ccc;padding:10px;margin:8px 0;background:#fafafa">
-  <div style="font-weight:bold;margin-bottom:4px">{m['structure_label']} — {symbol}</div>
-  <div style="color:#555;margin-bottom:6px">spot ${spot:.2f} · expiration {expiry}</div>
-  <table style="border-collapse:collapse;font-size:13px;margin-bottom:6px">
-    <thead><tr style="background:#eee">
-      <th align=left style="padding:2px 8px">LEG</th>
-      <th style="padding:2px 8px">QTY</th>
-      <th style="padding:2px 8px">STRIKE</th>
-      <th style="padding:2px 8px">DELTA</th>
-      <th style="padding:2px 8px">BID</th>
-      <th style="padding:2px 8px">MID</th>
-      <th style="padding:2px 8px">ASK</th>
-    </tr></thead>
-    <tbody>{legs_html}</tbody>
-  </table>
-  <table style="border-collapse:collapse;font-size:13px">
-    <tbody>{summary_html}</tbody>
-  </table>
-  {liq_html}
-  <div style="font-size:12px;color:#666;margin-top:6px">Sizing: {m['sizing']}</div>
+  <div style="font-weight:bold;margin-bottom:4px">{symbol} &nbsp; {structure} &nbsp; {_fmt_expiry(expiry)}</div>
+  {aside_html}
+  <div><b>Legs:</b> &nbsp;{legs_text}</div>
+  <div><b>Entry:</b> &nbsp;{c['entry']}</div>
+  {stop_html}
 </div>
 """
 
@@ -612,29 +630,6 @@ def build_construction_block(
             )
         text = _render_text(symbol, structure, expiry, spot, m)
         html = _render_html(symbol, structure, expiry, spot, m)
-        if rec is not None:
-            ann_text, ann_html = _moneyness_annotation(rec)
-            text = text + "\n" + ann_text
-            html = html.replace(
-                "<div style=\"font-size:12px;color:#666;margin-top:6px\">Sizing:",
-                ann_html + "\n  <div style=\"font-size:12px;color:#666;margin-top:6px\">Sizing:",
-            )
-        if if_wing_rec is not None:
-            ann_text, ann_html = _if_wing_annotation(if_wing_rec)
-            text = text + "\n" + ann_text
-            html = html.replace(
-                "<div style=\"font-size:12px;color:#666;margin-top:6px\">Sizing:",
-                ann_html + "\n  <div style=\"font-size:12px;color:#666;margin-top:6px\">Sizing:",
-            )
-        if structure.startswith("bull_put") and not is_mp_anchored:
-            ma_ann = _ma_bucket_annotation(symbol)
-            if ma_ann is not None:
-                ma_text, ma_html = ma_ann
-                text = text + "\n" + ma_text
-                html = html.replace(
-                    "<div style=\"font-size:12px;color:#666;margin-top:6px\">Sizing:",
-                    ma_html + "\n  <div style=\"font-size:12px;color:#666;margin-top:6px\">Sizing:",
-                )
         return {"ok": True, "text": text, "html": html, "error": None}
     except Exception as e:
         return {"ok": False, "text": "", "html": "",
