@@ -18,17 +18,17 @@ from __future__ import annotations
 #     "Symbols that respond well" sections) ──────────────────────────
 
 COHORT_BULL_PUT = [
-    "MSFT", "TJX", "WMT", "QQQ", "CNC", "SPY",
-    "INTC", "WFC", "XLU", "HYG", "AVGO", "JPM",
-    "GS", "GNRC", "SMH", "RCL", "FSLR", "AMAT",
-    "COF", "NET", "CIEN", "GOOG", "MRK", "GLW",
-    "COP", "MS", "CMG", "EXPE", "SLV", "XLE",
-    "GLD", "AAPL", "MU", "ORCL", "HOOD", "NU",
-    "C", "CSCO", "XSP", "RIOT", "RKLB", "NEM",
-    "VST", "CVX", "TEVA", "RTX", "TSEM", "COHR",
-    "KKR", "STX", "CLS", "VLO", "FANG", "KGC",
-    "HWM", "RRC", "TBT", "TOL",
-]  # auto-promotion update 2026-05-21
+    "MSFT", "TJX", "WMT", "QQQ", "SPY", "INTC",
+    "WFC", "XLU", "HYG", "AVGO", "JPM", "GS",
+    "GNRC", "SMH", "RCL", "FSLR", "AMAT", "COF",
+    "NET", "CIEN", "GOOG", "MRK", "GLW", "COP",
+    "MS", "CMG", "EXPE", "SLV", "XLE", "GLD",
+    "AAPL", "MU", "ORCL", "HOOD", "NU", "C",
+    "CSCO", "XSP", "RIOT", "RKLB", "NEM", "VST",
+    "CVX", "TEVA", "RTX", "TSEM", "COHR", "KKR",
+    "STX", "CLS", "VLO", "FANG", "KGC", "HWM",
+    "RRC", "TBT", "TOL",
+]  # auto-promotion update 2026-05-29
 
 COHORT_BEAR_CALL = [
     "SPX", "SPY", "QQQ", "DIA", "IWM", "WMT",
@@ -71,7 +71,8 @@ COHORT_ZEBRA_TIER2 = [
     "OKE", "LYV", "LNG", "MPC", "ADM", "LIN",
     "EIX", "AZN", "PWR", "SCCO", "TBT", "MTZ",
     "KEYS", "SOXX", "XLK", "SE", "RMBS", "TER",
-]  # auto-promotion update 2026-05-28
+    "PSX",
+]  # auto-promotion update 2026-05-29
 
 # Per-name overlay AUTO-attach cohort.
 # Names where the V3 (10% OTM put) overlay showed positive cohort-level lift
