@@ -47,7 +47,7 @@ WEEKDAY_JOBS = [
     ("refresh_earnings",         9, 22, f"cd {ROOT} && {PY} scripts/pipeline/refresh_earnings_calendar.py"),
     ("qualifier",                9, 25, f"cd {ROOT} && {PY} scripts/qualifier/cycle_qualifier.py"),
     ("pre_cycle_commentary",     9, 30, f"cd {ROOT} && {PY} scripts/monitor/pre_cycle_commentary.py"),
-    ("orats_health",            10,  0, f"cd {ROOT} && {PY} scripts/maintenance/orats_health_check.py"),
+    ("orats_health",            19, 40, f"cd {ROOT} && {PY} scripts/maintenance/orats_health_check.py"),  # after 19:00 ingest; 10:00 false-alarmed daily (ORATS is T+1)
     ("close_prices",            16, 16, f"cd {ROOT} && {PY} scripts/pipeline/update_close_prices.py"),
     ("mark_open_spreads",       16, 20, f"cd {ROOT} && {PY} scripts/pipeline/mark_open_spreads.py"),
     ("reconcile_qualifier",     16, 25, f"cd {ROOT} && {PY} scripts/postmortem/reconcile_qualifier_links.py"),

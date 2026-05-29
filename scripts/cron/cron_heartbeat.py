@@ -88,7 +88,7 @@ EXPECTED_DAILY = [
     ("qualifier",                "Cycle qualifier",           9, 25),
     ("agent_order_sync",         "Schwab order sync",         9, 30),
     ("pre_cycle_commentary",     "Pre-cycle commentary",      9, 30),
-    ("orats_health",             "ORATS health check",       10,  0),
+    ("orats_health",             "ORATS health check",       19, 40),
     ("agent_cd_maturity",        "CD maturity processor",    12,  0),
     ("agent_tbill_maturity",     "T-bill maturity processor",12,  5),
     ("agent_fedrss",             "Fed RSS scraper",          13, 10),
