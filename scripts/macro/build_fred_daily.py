@@ -84,6 +84,14 @@ def load_api_key() -> str:
     raise RuntimeError(f"FRED_API_KEY not found in {API_KEY_FILE}")
 
 
+# FRED's gateway throws transient 504s / read-timeouts under load (see the
+# 2026-05-28 outage that cascaded into a build_betas_rolling crash). Retry
+# those with backoff; do NOT retry 4xx (bad series id won't fix itself).
+FETCH_TIMEOUT = 60          # was 30 — outages manifested as read-timeouts
+MAX_RETRIES = 4             # ~ 1 + 2 + 4 + 8 = 15s of backoff worst case
+RETRYABLE_STATUS = {429, 500, 502, 503, 504}
+
+
 def fetch_series(api_key: str, series_id: str, start: str) -> pd.DataFrame:
     params = {
         "series_id":              series_id,
@@ -92,15 +100,30 @@ def fetch_series(api_key: str, series_id: str, start: str) -> pd.DataFrame:
         "observation_start":      start,
         "sort_order":             "asc",
     }
-    r = requests.get(BASE_URL, params=params, timeout=30)
-    r.raise_for_status()
-    obs = r.json().get("observations", [])
-    if not obs:
-        return pd.DataFrame(columns=["date", "value"])
-    df = pd.DataFrame(obs)[["date", "value"]]
-    df["date"] = pd.to_datetime(df["date"])
-    df["value"] = pd.to_numeric(df["value"], errors="coerce")
-    return df
+    last_exc: Exception | None = None
+    for attempt in range(MAX_RETRIES):
+        try:
+            r = requests.get(BASE_URL, params=params, timeout=FETCH_TIMEOUT)
+            if r.status_code in RETRYABLE_STATUS:
+                r.raise_for_status()  # -> HTTPError, handled below
+            r.raise_for_status()      # non-retryable 4xx propagates immediately
+            obs = r.json().get("observations", [])
+            if not obs:
+                return pd.DataFrame(columns=["date", "value"])
+            df = pd.DataFrame(obs)[["date", "value"]]
+            df["date"] = pd.to_datetime(df["date"])
+            df["value"] = pd.to_numeric(df["value"], errors="coerce")
+            return df
+        except requests.exceptions.HTTPError as e:
+            status = e.response.status_code if e.response is not None else None
+            if status not in RETRYABLE_STATUS:
+                raise  # 4xx — don't retry
+            last_exc = e
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+            last_exc = e
+        if attempt < MAX_RETRIES - 1:
+            time.sleep(2 ** attempt)  # 1, 2, 4s backoff
+    raise last_exc  # exhausted retries
 
 
 def main():
@@ -123,6 +146,7 @@ def main():
 
     print(f"Fetching {len(series)} series from {args.start}...")
     rows = []
+    n_failed = 0
     for i, (sid, (name, freq)) in enumerate(series.items(), 1):
         try:
             df = fetch_series(api_key, sid, args.start)
@@ -134,11 +158,23 @@ def main():
             print(f"  [{i:2d}/{len(series)}] {sid:14s} {name:32s} n={len(df):6d}  valid={n_valid:6d}  "
                   f"{df['date'].min().date() if len(df) else '—'} → {df['date'].max().date() if len(df) else '—'}")
         except Exception as e:
+            n_failed += 1
             print(f"  [{i:2d}/{len(series)}] {sid:14s} FAILED: {e}")
         time.sleep(0.05)  # polite spacing; FRED tolerates 120/min
 
+    # Write-guard: a partial fetch (e.g. a FRED outage) must NOT overwrite the
+    # last-good parquet with a near-empty one — that silently clobbers history
+    # and crashes downstream beta builders. Abort loud, leave the good file.
+    MIN_SUCCESS_RATE = 0.90
+    n_ok = len(series) - n_failed
     if not rows:
-        print("No data fetched — aborting.")
+        print("No data fetched — aborting (existing parquet left intact).")
+        sys.exit(1)
+    if n_ok / len(series) < MIN_SUCCESS_RATE:
+        print(f"\nABORT: only {n_ok}/{len(series)} series fetched "
+              f"({n_ok / len(series):.0%} < {MIN_SUCCESS_RATE:.0%} floor) — "
+              f"likely a transient FRED outage. Existing {Path(args.out).name} "
+              f"left intact; re-run when FRED recovers.")
         sys.exit(1)
 
     out = pd.concat(rows, ignore_index=True)
