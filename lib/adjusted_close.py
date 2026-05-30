@@ -54,6 +54,13 @@ MANUAL_OVERRIDE = _MANUAL_CONFIG if _MANUAL_CONFIG.exists() else _MANUAL_LEGACY
 LEDGER_PATH = Path.home() / "MaxPain_Project/config/splits_ledger.csv"
 LEDGER_META = Path.home() / "MaxPain_Project/config/splits_ledger.meta.json"
 
+# External-source close backfill for ORATS feed GAPS (e.g. Barrick/GOLD lost
+# from the feed Jun–Nov 2025 during its ticker change). Tracked + auditable;
+# columns ticker,date,close,source,note. Filled ONLY for dates missing from the
+# ORATS series, so real data always wins. Built by
+# scripts/maintenance/backfill_price_gap.py (yfinance, boundary scale-matched).
+BACKFILL_PATH = Path.home() / "MaxPain_Project/config/price_backfill.csv"
+
 _BIG_MOVE = 0.40        # min single-day move to consider a split
 _FACTOR_TOL = 0.04      # ratio must be within 4% of a clean factor
 _NEIGHBOR_MAX = 0.15    # neighbor-day moves must be calmer than this
@@ -182,11 +189,29 @@ def _splits_for(ticker: str, s: pd.Series) -> list[dict]:
     return sorted(by_date.values(), key=lambda x: x["date"])
 
 
+@functools.lru_cache(maxsize=1)
+def _load_backfill() -> dict[str, pd.Series]:
+    """External-source close backfill keyed by ticker (close Series), for ORATS
+    feed gaps. Empty if the file is absent."""
+    out: dict[str, list] = {}
+    if not BACKFILL_PATH.exists():
+        return {}
+    with open(BACKFILL_PATH) as f:
+        for r in csv.DictReader(f):
+            t = r["ticker"].strip().upper()
+            out.setdefault(t, []).append((pd.Timestamp(r["date"]), float(r["close"])))
+    return {t: pd.Series(dict(v)).sort_index() for t, v in out.items()}
+
+
 def load_adjusted_close(ticker: str, by_ticker_dir: Path = BY_TICKER) -> pd.Series:
     """Continuous split-adjusted close for a ticker, driven by the authoritative
     feed-reconciled ledger (falling back to live detection for unreconciled
-    tickers)."""
+    tickers). ORATS feed gaps are filled from the tracked price-backfill file
+    (real ORATS data always takes precedence)."""
     s = _load_raw(ticker, by_ticker_dir)
+    bf = _load_backfill().get(ticker.upper())
+    if bf is not None and by_ticker_dir == BY_TICKER:
+        s = s.combine_first(bf).sort_index()   # fills only dates missing from ORATS
     return back_adjust(s, _splits_for(ticker, s))
 
 
