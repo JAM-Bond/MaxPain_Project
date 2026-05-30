@@ -10,7 +10,13 @@ rolling betas, 200-DMA, relative strength.
 This module produces a back-adjusted close so those consumers see a continuous
 series. It does NOT mutate the option archive.
 
-Detection is data-driven and conservative:
+Source of truth: the feed-reconciled ledger at config/splits_ledger.csv (built by
+scripts/maintenance/build_splits_ledger.py, which cross-checks the price-jump
+heuristic below against the yfinance corporate-actions feed and price-confirms
+every split). `load_adjusted_close` reads that ledger for any reconciled ticker;
+the heuristic here is the FALLBACK for tickers not yet in the ledger.
+
+The fallback detection is data-driven and conservative:
   - a single-day move > ~40% whose ratio snaps to a clean split factor
     (k:1 or 1:k for k in 2..30, plus 3:2 / 5:2), AND
   - smooth neighbor days (|return| < 15% on either side)
@@ -27,12 +33,26 @@ Usage:
 from __future__ import annotations
 
 import csv
+import functools
+import json
 from pathlib import Path
 
 import pandas as pd
 
 BY_TICKER = Path.home() / "MaxPain_Project/data/orats/by_ticker"
-MANUAL_OVERRIDE = Path.home() / "MaxPain_Project/data/profile/splits_manual.csv"
+# Manual overrides: prefer the tracked config/ copy, fall back to legacy data/.
+_MANUAL_CONFIG = Path.home() / "MaxPain_Project/config/splits_manual.csv"
+_MANUAL_LEGACY = Path.home() / "MaxPain_Project/data/profile/splits_manual.csv"
+MANUAL_OVERRIDE = _MANUAL_CONFIG if _MANUAL_CONFIG.exists() else _MANUAL_LEGACY
+
+# Authoritative, feed-reconciled split ledger (built by
+# scripts/maintenance/build_splits_ledger.py). When a ticker has been reconciled
+# (listed in the manifest), this ledger is the SOLE source of truth — including
+# the case of zero rows, which means "reconciled, no real split" and correctly
+# SUPPRESSES detector artifacts (e.g. META's corrupt-data 14:1). Tickers absent
+# from the manifest fall back to live price-discontinuity detection + manual.
+LEDGER_PATH = Path.home() / "MaxPain_Project/config/splits_ledger.csv"
+LEDGER_META = Path.home() / "MaxPain_Project/config/splits_ledger.meta.json"
 
 _BIG_MOVE = 0.40        # min single-day move to consider a split
 _FACTOR_TOL = 0.04      # ratio must be within 4% of a clean factor
@@ -120,16 +140,54 @@ def back_adjust(s: pd.Series, splits: list[dict]) -> pd.Series:
     return s * factor
 
 
-def load_adjusted_close(ticker: str, by_ticker_dir: Path = BY_TICKER) -> pd.Series:
-    """Continuous split-adjusted close for a ticker (detected + manual splits)."""
-    s = _load_raw(ticker, by_ticker_dir)
+@functools.lru_cache(maxsize=1)
+def _load_ledger() -> tuple[dict[str, list[dict]], frozenset[str]]:
+    """Load the authoritative split ledger + the set of reconciled tickers.
+    Cached for the process; the daily cron readers are short-lived so they always
+    pick up the latest ledger."""
+    reconciled: frozenset[str] = frozenset()
+    if LEDGER_META.exists():
+        try:
+            reconciled = frozenset(json.loads(LEDGER_META.read_text())
+                                   .get("reconciled_tickers", []))
+        except Exception:
+            reconciled = frozenset()
+    by_ticker: dict[str, list[dict]] = {}
+    if LEDGER_PATH.exists():
+        with open(LEDGER_PATH) as f:
+            for r in csv.DictReader(f):
+                t = r["ticker"].strip().upper()
+                by_ticker.setdefault(t, []).append({
+                    "date": pd.Timestamp(r["date"]),
+                    "factor": float(r["factor"]),
+                    "label": r.get("label", ""),
+                })
+    return by_ticker, reconciled
+
+
+def _splits_for(ticker: str, s: pd.Series) -> list[dict]:
+    """Authoritative splits for a ticker: the feed-reconciled ledger when the
+    ticker has been reconciled (zero rows ⇒ no split, artifacts suppressed),
+    else live detection + manual overrides as a fallback."""
+    ledger, reconciled = _load_ledger()
+    if ticker.upper() in reconciled:
+        return sorted(ledger.get(ticker.upper(), []), key=lambda x: x["date"])
+    # Fallback: ticker not yet in the reconciled ledger (e.g. brand-new name
+    # before the nightly refresh). Use the heuristic + manual overrides.
     splits = detect_splits(s)
-    # Manual entries override/augment detected ones (dedupe by date).
     manual = _manual_for(ticker)
     by_date = {sp["date"].normalize(): sp for sp in splits}
     for m in manual:
         by_date[m["date"].normalize()] = m   # manual wins
-    return back_adjust(s, sorted(by_date.values(), key=lambda x: x["date"]))
+    return sorted(by_date.values(), key=lambda x: x["date"])
+
+
+def load_adjusted_close(ticker: str, by_ticker_dir: Path = BY_TICKER) -> pd.Series:
+    """Continuous split-adjusted close for a ticker, driven by the authoritative
+    feed-reconciled ledger (falling back to live detection for unreconciled
+    tickers)."""
+    s = _load_raw(ticker, by_ticker_dir)
+    return back_adjust(s, _splits_for(ticker, s))
 
 
 if __name__ == "__main__":
