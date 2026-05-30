@@ -44,6 +44,7 @@ EARNINGS_CACHE = ROOT / "data/profile/earnings_calendar_cache.parquet"
 sys.path.insert(0, str(ROOT))
 
 from lib.db import DB_PATH, connect  # noqa: E402
+from lib.adjusted_close import load_adjusted_close  # noqa: E402
 
 logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(message)s")
 log = logging.getLogger("alert")
@@ -767,16 +768,18 @@ def compute_52w_status(symbol: str) -> tuple[str, float | None, float | None,
 
     status ∈ {at_52w_high, near_52w_high, at_52w_low, near_52w_low, neither}.
     Returns None if insufficient history.
+
+    Uses split-adjusted close (lib.adjusted_close) so a split inside the 252-day
+    window can't manufacture a phantom 52-week low/high. Back-adjustment leaves
+    the latest segment unchanged, so `close` is still the true current price.
     """
     path = BY_TICKER / f"{symbol}.parquet"
     if not path.exists():
         return None
-    df = pd.read_parquet(path, columns=["trade_date", "stkPx"])
-    df["trade_date"] = pd.to_datetime(df["trade_date"])
-    daily = (df.dropna(subset=["stkPx"])
-               .drop_duplicates("trade_date")
-               .sort_values("trade_date")
-               .set_index("trade_date")["stkPx"])
+    try:
+        daily = load_adjusted_close(symbol).dropna().sort_index()
+    except Exception:
+        return None
     if len(daily) < W52_LOOKBACK:
         return None
     window = daily.iloc[-W52_LOOKBACK:]

@@ -38,6 +38,7 @@ import pandas as pd
 sys.path.insert(0, str(Path.home() / "MaxPain_Project"))
 from lib.db import DB_PATH, connect  # noqa: E402
 from lib.snapshot import take_snapshot, current_opex  # noqa: E402
+from lib.adjusted_close import load_adjusted_close  # noqa: E402
 
 ROOT = Path.home() / "MaxPain_Project"
 
@@ -133,6 +134,21 @@ def compute_regime_state(today: date) -> dict | None:
     daily = daily.sort_index()
     if len(daily) < 252:
         return None
+
+    # Split-adjust the close series so the 200-DMA / log-returns aren't corrupted
+    # by an unadjusted split discontinuity (reference_orats_split_adjustment).
+    # SPY has never split, so this is defensive — but it keeps every MA reader on
+    # one code path. Back-adjustment leaves the latest segment unchanged, so the
+    # reported spy_close stays the true current price. Only swap if the adjusted
+    # series aligns cleanly; otherwise fall back to the raw front-month close.
+    try:
+        adj = load_adjusted_close("SPY")
+        adj.index = pd.to_datetime(adj.index)
+        aligned = adj.reindex(daily.index)
+        if float(aligned.notna().mean()) > 0.99:
+            daily["close"] = aligned
+    except Exception:
+        pass
 
     daily["ma200"] = daily["close"].rolling(200, min_periods=100).mean()
     daily["below_200dma"] = daily["close"] < daily["ma200"]

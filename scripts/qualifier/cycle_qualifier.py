@@ -44,6 +44,7 @@ from lib.opex_calendar import (  # noqa: E402
 from scripts.qualifier import gate_config as G  # noqa: E402
 from scripts.qualifier.earnings_calendar import upcoming_earnings  # noqa: E402
 from lib.sector_map import get_sector, is_cap_exempt, ETF_SENTINEL, UNKNOWN_SENTINEL  # noqa: E402
+from lib.adjusted_close import load_adjusted_close  # noqa: E402
 
 log = logging.getLogger(__name__)
 
@@ -55,7 +56,32 @@ ORATS_BY_TICKER = ROOT / "data/orats/by_ticker"
 
 import functools
 
+
 @functools.lru_cache(maxsize=64)
+def _adjusted_ma200(symbol: str) -> pd.DataFrame | None:
+    """Split-adjusted close + 200-DMA for a symbol, or None when history is
+    missing/short. Uses lib.adjusted_close so the 200-DMA isn't corrupted by an
+    unadjusted ORATS split discontinuity (see reference_orats_split_adjustment).
+    Back-adjustment leaves the most-recent segment unchanged, so the latest
+    close still equals the true current price.
+
+    Returns a DataFrame indexed by trade_date with columns [close, ma200],
+    rows where ma200 is defined. None on missing file / read error / <200 rows.
+    """
+    p = ORATS_BY_TICKER / f"{symbol}.parquet"
+    if not p.exists():
+        return None
+    try:
+        s = load_adjusted_close(symbol).dropna().sort_index()
+    except Exception:
+        return None
+    if len(s) < 200:
+        return None
+    df = pd.DataFrame({"close": s, "ma200": s.rolling(200).mean()})
+    df = df.dropna(subset=["ma200"])
+    return df if not df.empty else None
+
+
 def zebra_trend_status(symbol: str) -> dict | None:
     """Persistence-trend check for ZEBRA: sustained downtrend = name has been
     below its 200-DMA for ≥G.ZEBRA_TREND_BELOW_200DMA_THRESHOLD of the last
@@ -63,22 +89,11 @@ def zebra_trend_status(symbol: str) -> dict | None:
     is missing — the gate fails open in that case (legacy v1 cohort names
     may not be in the v2 ORATS pool).
     """
-    p = ORATS_BY_TICKER / f"{symbol}.parquet"
-    if not p.exists():
-        return None
-    try:
-        df = pd.read_parquet(p, columns=["trade_date", "stkPx"])
-    except Exception:
-        return None
-    df = df.dropna(subset=["stkPx"]).drop_duplicates("trade_date").sort_values("trade_date")
-    if len(df) < 200:
-        return None
-    df["ma200"] = df["stkPx"].rolling(200).mean()
-    df = df.dropna(subset=["ma200"])
-    if df.empty:
+    df = _adjusted_ma200(symbol)
+    if df is None:
         return None
     tail = df.tail(G.ZEBRA_TREND_LOOKBACK_DAYS)
-    days_below = int((tail["stkPx"] < tail["ma200"]).sum())
+    days_below = int((tail["close"] < tail["ma200"]).sum())
     return {
         "sustained_downtrend": days_below >= G.ZEBRA_TREND_BELOW_200DMA_THRESHOLD,
         "days_below": days_below,
@@ -92,24 +107,11 @@ def bull_put_ma_pct(symbol: str) -> float | None:
     (project_bullput_below_ma_findings.md, 2026-05-05). Returns None when
     history is missing — caller fails open.
     """
-    p = ORATS_BY_TICKER / f"{symbol}.parquet"
-    if not p.exists():
-        return None
-    try:
-        df = pd.read_parquet(p, columns=["trade_date", "stkPx"])
-    except Exception:
-        return None
-    df = (df.dropna(subset=["stkPx"])
-            .drop_duplicates("trade_date")
-            .sort_values("trade_date"))
-    if len(df) < 200:
-        return None
-    df["ma200"] = df["stkPx"].rolling(200).mean()
-    df = df.dropna(subset=["ma200"])
-    if df.empty:
+    df = _adjusted_ma200(symbol)
+    if df is None:
         return None
     last = df.iloc[-1]
-    spot = float(last["stkPx"])
+    spot = float(last["close"])
     ma = float(last["ma200"])
     if ma <= 0:
         return None
