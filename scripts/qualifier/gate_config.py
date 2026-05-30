@@ -30,13 +30,40 @@ COHORT_BULL_PUT = [
     "RRC", "TBT", "TOL",
 ]  # auto-promotion update 2026-05-29
 
+# Bear-call cohort — RESTRUCTURED 2026-05-30 (no longer pipeline-managed).
+#
+# The bear-trade-in-a-bull-market search closed with 6 independent rejections
+# (sector RS, narrowness, theta-timing placebo, below-MA, sector stage-2,
+# live-state/IV filter). Deeper finding: the auto-promotion Gate-B "recent
+# positive" criterion is a declining-period fossil — Gate-B-eligible cycles
+# average -$0.165/sh FORWARD. There is no validated edge in *picking which
+# single names* to sell calls on in this regime; the only validated bearish
+# edge is the broad-market H1 *when* (SPY < 200-DMA AND IVR_252 > 0.5), which
+# the qualifier enforces on every bear_call via _bear_call_h1_ok().
+#
+# TIER 1 (active) — H1-gated index/ETF ONLY. Un-gated backtests are deeply
+# negative BY DESIGN; these only fire when H1 is active. This is the list
+# is_in_cohort() reads, so single names no longer auto-qualify (2d shrink).
+# bear_call auto-promotion was also DISABLED in
+# scripts/maintenance/auto_promotion_gate_check.py (the evaluate_batch
+# promotion path) so the nightly pipeline can no longer add single names to
+# this block. The `# auto-promotion update` tag is intentionally gone.
+# See docs/BEARCALL_COHORT_CLEANUP_PROPOSAL.md (Decisions 1 + 2d, 2026-05-30).
 COHORT_BEAR_CALL = [
-    "SPX", "SPY", "QQQ", "DIA", "IWM", "WMT",
-    "EL", "TGT", "BA", "MMM", "DVN", "HUM",
-    "ADBE", "IBM", "SNAP", "XLP", "IEF", "GME",
-    "UNH", "DOW", "MRK", "NEE", "LCID", "TMF",
-    "ZTS", "STZ",
-]  # auto-promotion update 2026-05-28
+    "SPX", "SPY", "QQQ", "DIA", "IWM", "XLP", "IEF", "TMF",
+]
+
+# TIER 2 (discretionary — NOT wired into is_in_cohort) — legacy single names,
+# kept only for the record. If ever traded, treat as discretionary, H1-gated,
+# 1/3 size. Dropped from the active cohort 2026-05-30:
+#   2a chronic-negative: WMT (up-trending), IBM/MMM/DVN; ARRY (no cycle data).
+#   pipeline fossils (caught past declines, not future): ADBE/BA/DOW/TGT/MRK,
+#     plus EL/HUM/SNAP/NEE/LCID/GME.
+# UNH/ZTS/STZ are open positions managed via the book (spread_score_trades),
+# not via cohort membership — their inclusion here is documentary only.
+COHORT_BEAR_CALL_DISCRETIONARY: list[str] = [
+    "UNH", "ZTS", "STZ",   # live positions; UNH=book, ZTS=book, STZ=hold/manage
+]
 
 COHORT_INVERTED_FLY_PAIR = [
     "SPX", "SPY", "QQQ", "GLD", "EFA", "WMT", "NEM", "XOM",
@@ -71,8 +98,8 @@ COHORT_ZEBRA_TIER2 = [
     "OKE", "LYV", "LNG", "MPC", "ADM", "LIN",
     "EIX", "AZN", "PWR", "SCCO", "TBT", "MTZ",
     "KEYS", "SOXX", "XLK", "SE", "RMBS", "TER",
-    "PSX",
-]  # auto-promotion update 2026-05-29
+    "PSX", "COST",
+]  # auto-promotion update 2026-05-30
 
 # Per-name overlay AUTO-attach cohort.
 # Names where the V3 (10% OTM put) overlay showed positive cohort-level lift

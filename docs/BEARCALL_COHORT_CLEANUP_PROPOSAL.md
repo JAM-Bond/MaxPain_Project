@@ -1,6 +1,11 @@
 # Proposal — Bear-Call Cohort Cleanup & Membership Governance
 
-**Status: PROPOSAL (not applied).** Drafted 2026-05-30 (Opus 4.8 session). Requires user sign-off before any `gate_config.py` edit. Evidence: `project_bearcall_live_state_filter_rejected`, `reports/bearcall_live_state_filter_2026-05-30.md`, `scripts/research/bearcall_cohort_spotlight.py`.
+**Status: APPLIED 2026-05-30** (Opus 4.8 session, user sign-off "just decide cleanup now"). Decisions 1 (2a drops) + 4 (2d strategic shrink) adopted; 2b tier-labeling folded into gate_config comments; 3 (2c persistence-gate pre-reg) **declined**. Drafted 2026-05-30. Evidence: `project_bearcall_live_state_filter_rejected`, `reports/bearcall_live_state_filter_2026-05-30.md`, `scripts/research/bearcall_cohort_spotlight.py`.
+
+**What changed (durable, both verified):**
+- `scripts/qualifier/gate_config.py` — `COHORT_BEAR_CALL` reduced to the H1-gated index/ETF tier (`SPX SPY QQQ DIA IWM XLP IEF TMF`); all single names removed from the active cohort; new documentary `COHORT_BEAR_CALL_DISCRETIONARY = [UNH, ZTS, STZ]` (the live positions, managed via the book — NOT wired into `is_in_cohort`).
+- `scripts/maintenance/auto_promotion_gate_check.py` — `evaluate_batch` promotion path now emits `NO_CHANGE` (not `PROMOTE`) for any `bear_call` candidate, so the nightly pipeline **can no longer add single names back** to `COHORT_BEAR_CALL` (otherwise it would re-promote the fossils tonight). Symmetric to the pre-existing Gate-F bear_call *demotion* exemption. The `# auto-promotion update` tag was removed from the gate_config block to match. (Note: there is no `MANAGED_COHORTS` constant; the writer uses `STRUCTURE_TO_COHORT` and the decision logic lives in `gate_check.py:evaluate_batch`.)
+- Verified: `is_in_cohort("SPY","bear_call")=True`, `WMT/UNH=False`; bull_put/inverted_fly_single/zebra_tier2 still pipeline-managed; unit test confirms bear_call→NO_CHANGE while bull_put→PROMOTE; all files parse.
 
 ---
 
@@ -41,11 +46,11 @@ Given no validated single-name bear-call edge, the defensible posture is to **sh
 - **ZTS** — recent +0.72 is one crash, now exhausted (97% realized vol, on the strike). Book it.
 - **STZ** — the only one with a *live* reason: genuinely still below a falling 200-DMA, recent +0.27 reflects an ongoing downtrend. Hold/manage normally, but recognize it's regime-dependent (needs continued weakness), not a validated edge.
 
-## 4. Decision points for the user
-1. Apply the 2a drops now (WMT/IBM/MMM/DVN, + ARRY pending re-extract)? **(low-risk, recommended)**
-2. Adopt the 2b regime-gated tier labeling?
-3. Commission the 2c persistence-gate as a sealed pre-reg (build the held-out + concentration check into the pipeline's Gate B)?
-4. Adopt the 2d strategic shrink, or keep single-name bear-calls as discretionary/H1-gated?
+## 4. Decision points for the user — RESOLVED 2026-05-30
+1. Apply the 2a drops (WMT/IBM/MMM/DVN, + ARRY)? → **YES, applied** — and via the 2d shrink, every other single name too.
+2. Adopt the 2b regime-gated tier labeling? → **YES** — folded into the gate_config Tier 1 / Tier 2 comments.
+3. Commission the 2c persistence-gate as a sealed pre-reg? → **DECLINED.** Instead, bear_call auto-promotion was disabled entirely in `gate_check.py:evaluate_batch` (no validated gate exists to promote into; re-enable only behind a future validated gate).
+4. Adopt the 2d strategic shrink? → **YES.** Single-name bear-calls shrunk to zero in the active cohort; bearishness routes to H1-gated index/ETF bear-calls + *buying* convexity for crash protection.
 
 ## 5. Cross-references
 - `project_bearcall_live_state_filter_rejected` · `project_theta_timing_null` · `project_bear_call_h1_h3_findings` (the validated H1 gate) · `scripts/maintenance/auto_promotion_gate_check.py` (the Gate B to amend).

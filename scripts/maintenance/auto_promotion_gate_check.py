@@ -249,7 +249,29 @@ def evaluate_batch(
             continue
 
         # ── Promotion path (only for names NOT currently in cohort) ──
-        if (row["gate_b_pass"] and row["gate_d_pass"] and row["gate_e_pass"]):
+        promote_ok = row["gate_b_pass"] and row["gate_d_pass"] and row["gate_e_pass"]
+        # bear_call auto-promotion DISABLED 2026-05-30. The bear-trade search
+        # closed with 6 independent rejections + the finding that Gate-B "recent
+        # positive" promotions are declining-period fossils (Gate-B-eligible
+        # cycles average -$0.165/sh FORWARD). COHORT_BEAR_CALL is now hand-
+        # curated to the H1-gated index/ETF tier in gate_config.py; the pipeline
+        # must not add single names back. Symmetric to the Gate-F bear_call
+        # exemption above. To re-enable, remove this branch AND repopulate per a
+        # validated gate (not the old Gate B). Manual --promote still possible.
+        # See docs/BEARCALL_COHORT_CLEANUP_PROPOSAL.md (Decisions 1 + 2d).
+        if promote_ok and structure == "bear_call":
+            decisions.append(GateDecision(
+                ticker=ticker, structure=structure, action="NO_CHANGE",
+                reason=("bear_call auto-promotion disabled 2026-05-30 — no "
+                        "validated single-name edge; COHORT_BEAR_CALL hand-"
+                        "curated to H1-gated index/ETF tier"),
+                detail={
+                    "gate_b": row["gate_b_detail"],
+                    "gate_d": row["gate_d_detail"],
+                    "most_recent_p": row["most_recent_p"],
+                },
+            ))
+        elif promote_ok:
             decisions.append(GateDecision(
                 ticker=ticker, structure=structure, action="PROMOTE",
                 reason=(
