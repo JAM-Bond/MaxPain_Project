@@ -1,14 +1,14 @@
 {
  "built": "2026-05-29",
- "n_tickers": 162,
+ "n_tickers": 164,
  "scope": "all_by_ticker",
  "tally": {
-  "CONFIRMED": 130,
+  "CONFIRMED": 131,
   "DETECTOR_SUSPECT": 35,
   "FEED_ONLY": 28,
   "OUT_OF_RANGE": 26,
   "FEED_FRACTIONAL_REVIEW": 15,
-  "FEED_UNCONFIRMED": 11,
+  "FEED_UNCONFIRMED": 12,
   "MANUAL": 2
  },
  "reconciled_tickers": [
@@ -57,6 +57,7 @@
   "AR",
   "ARKK",
   "ARM",
+  "ARRY",
   "ASST",
   "ASTS",
   "ASX",
@@ -84,6 +85,7 @@
   "BKLN",
   "BKNG",
   "BKR",
+  "BKSY",
   "BLDP",
   "BLDR",
   "BMBL",
@@ -146,6 +148,7 @@
   "CRM",
   "CRML",
   "CROX",
+  "CRSR",
   "CRVS",
   "CRWD",
   "CRWV",
@@ -176,6 +179,7 @@
   "DJX",
   "DKNG",
   "DKS",
+  "DLTR",
   "DOCN",
   "DOCS",
   "DOCU",
@@ -244,6 +248,7 @@
   "GDX",
   "GDYN",
   "GE",
+  "GEV",
   "GFI",
   "GFS",
   "GGP",
@@ -259,10 +264,12 @@
   "GOLD",
   "GOOG",
   "GOOGL",
+  "GPN",
   "GRPN",
   "GS",
   "GSK",
   "GTLB",
+  "GXO",
   "HAL",
   "HD",
   "HIMS",
@@ -413,6 +420,7 @@
   "ON",
   "ONDS",
   "ONON",
+  "OPEN",
   "ORCL",
   "OSCR",
   "OWL",
@@ -488,6 +496,7 @@
   "SGI",
   "SHAK",
   "SHEL",
+  "SHLS",
   "SHOP",
   "SIDU",
   "SIL",
@@ -528,6 +537,7 @@
   "STLA",
   "STLD",
   "STM",
+  "STUB",
   "STX",
   "STZ",
   "SWKS",
@@ -638,6 +648,7 @@
   "XLY",
   "XOM",
   "XOP",
+  "XOVR",
   "XPEV",
   "XSP",
   "XYZ",
@@ -647,5 +658,379 @@
   "ZM",
   "ZS",
   "ZTS"
+ ],
+ "flagged": [
+  {
+   "ticker": "AA",
+   "date": "2016-11-01",
+   "status": "FEED_FRACTIONAL_REVIEW",
+   "label": "1.25:1"
+  },
+  {
+   "ticker": "AI",
+   "date": "2020-12-15",
+   "status": "DETECTOR_SUSPECT",
+   "label": "1:36"
+  },
+  {
+   "ticker": "BBT",
+   "date": "2025-09-03",
+   "status": "DETECTOR_SUSPECT",
+   "label": "2:1"
+  },
+  {
+   "ticker": "BKSY",
+   "date": "2024-09-09",
+   "status": "FEED_UNCONFIRMED",
+   "label": "1:8"
+  },
+  {
+   "ticker": "BTU",
+   "date": "2015-10-01",
+   "status": "DETECTOR_SUSPECT",
+   "label": "1:13"
+  },
+  {
+   "ticker": "BTU",
+   "date": "2017-04-12",
+   "status": "DETECTOR_SUSPECT",
+   "label": "1:12"
+  },
+  {
+   "ticker": "COHR",
+   "date": "2022-09-09",
+   "status": "DETECTOR_SUSPECT",
+   "label": "6:1"
+  },
+  {
+   "ticker": "CORZ",
+   "date": "2022-10-27",
+   "status": "DETECTOR_SUSPECT",
+   "label": "5:1"
+  },
+  {
+   "ticker": "CORZ",
+   "date": "2024-01-26",
+   "status": "DETECTOR_SUSPECT",
+   "label": "1:45"
+  },
+  {
+   "ticker": "CPRI",
+   "date": "2024-10-25",
+   "status": "DETECTOR_SUSPECT",
+   "label": "2:1"
+  },
+  {
+   "ticker": "DELL",
+   "date": "2019-03-01",
+   "status": "DETECTOR_SUSPECT",
+   "label": "1:4"
+  },
+  {
+   "ticker": "DHR",
+   "date": "2016-07-05",
+   "status": "FEED_FRACTIONAL_REVIEW",
+   "label": "1.33:1"
+  },
+  {
+   "ticker": "DJX",
+   "date": "2018-01-09",
+   "status": "DETECTOR_SUSPECT",
+   "label": "1:100"
+  },
+  {
+   "ticker": "ET",
+   "date": "2014-01-27",
+   "status": "FEED_UNCONFIRMED",
+   "label": "2:1"
+  },
+  {
+   "ticker": "ET",
+   "date": "2015-07-27",
+   "status": "FEED_UNCONFIRMED",
+   "label": "2:1"
+  },
+  {
+   "ticker": "ETE",
+   "date": "2014-01-27",
+   "status": "DETECTOR_SUSPECT",
+   "label": "2:1"
+  },
+  {
+   "ticker": "ETE",
+   "date": "2015-07-27",
+   "status": "DETECTOR_SUSPECT",
+   "label": "2:1"
+  },
+  {
+   "ticker": "EXC",
+   "date": "2022-02-02",
+   "status": "FEED_FRACTIONAL_REVIEW",
+   "label": "1.4:1"
+  },
+  {
+   "ticker": "FCEL",
+   "date": "2019-05-09",
+   "status": "FEED_UNCONFIRMED",
+   "label": "1:12"
+  },
+  {
+   "ticker": "FIG",
+   "date": "2025-08-04",
+   "status": "DETECTOR_SUSPECT",
+   "label": "1:12"
+  },
+  {
+   "ticker": "FLEX",
+   "date": "2024-01-03",
+   "status": "FEED_FRACTIONAL_REVIEW",
+   "label": "1.33:1"
+  },
+  {
+   "ticker": "FTI",
+   "date": "2021-02-16",
+   "status": "FEED_FRACTIONAL_REVIEW",
+   "label": "1.33:1"
+  },
+  {
+   "ticker": "GE",
+   "date": "2024-04-02",
+   "status": "FEED_FRACTIONAL_REVIEW",
+   "label": "1.25:1"
+  },
+  {
+   "ticker": "GOLD",
+   "date": "2022-06-07",
+   "status": "FEED_UNCONFIRMED",
+   "label": "2:1"
+  },
+  {
+   "ticker": "GOOG",
+   "date": "2014-03-27",
+   "status": "FEED_UNCONFIRMED",
+   "label": "2:1"
+  },
+  {
+   "ticker": "GOOG",
+   "date": "2014-04-03",
+   "status": "DETECTOR_SUSPECT",
+   "label": "2:1"
+  },
+  {
+   "ticker": "GSK",
+   "date": "2022-07-19",
+   "status": "FEED_FRACTIONAL_REVIEW",
+   "label": "1:1.25"
+  },
+  {
+   "ticker": "GSK",
+   "date": "2022-07-22",
+   "status": "FEED_UNCONFIRMED",
+   "label": "1.25:1"
+  },
+  {
+   "ticker": "HPE",
+   "date": "2017-04-03",
+   "status": "FEED_FRACTIONAL_REVIEW",
+   "label": "1.33:1"
+  },
+  {
+   "ticker": "HPQ",
+   "date": "2015-11-02",
+   "status": "DETECTOR_SUSPECT",
+   "label": "2:1"
+  },
+  {
+   "ticker": "HTZ",
+   "date": "2016-07-01",
+   "status": "DETECTOR_SUSPECT",
+   "label": "1:4"
+  },
+  {
+   "ticker": "HTZ",
+   "date": "2021-11-10",
+   "status": "DETECTOR_SUSPECT",
+   "label": "1:14"
+  },
+  {
+   "ticker": "ITUB",
+   "date": "2018-11-28",
+   "status": "FEED_FRACTIONAL_REVIEW",
+   "label": "1.5:1"
+  },
+  {
+   "ticker": "LBTYA",
+   "date": "2014-03-05",
+   "status": "DETECTOR_SUSPECT",
+   "label": "2:1"
+  },
+  {
+   "ticker": "META",
+   "date": "2022-06-10",
+   "status": "DETECTOR_SUSPECT",
+   "label": "1:14"
+  },
+  {
+   "ticker": "NVAX",
+   "date": "2019-02-28",
+   "status": "DETECTOR_SUSPECT",
+   "label": "3:1"
+  },
+  {
+   "ticker": "NVAX",
+   "date": "2019-05-10",
+   "status": "FEED_UNCONFIRMED",
+   "label": "1:20"
+  },
+  {
+   "ticker": "P",
+   "date": "2026-04-20",
+   "status": "DETECTOR_SUSPECT",
+   "label": "1:8"
+  },
+  {
+   "ticker": "PATH",
+   "date": "2021-05-07",
+   "status": "DETECTOR_SUSPECT",
+   "label": "1:16"
+  },
+  {
+   "ticker": "PL",
+   "date": "2021-12-14",
+   "status": "DETECTOR_SUSPECT",
+   "label": "10:1"
+  },
+  {
+   "ticker": "QURE",
+   "date": "2025-11-03",
+   "status": "DETECTOR_SUSPECT",
+   "label": "2:1"
+  },
+  {
+   "ticker": "RAI",
+   "date": "2015-09-01",
+   "status": "DETECTOR_SUSPECT",
+   "label": "2:1"
+  },
+  {
+   "ticker": "RKT",
+   "date": "2014-08-28",
+   "status": "DETECTOR_SUSPECT",
+   "label": "2:1"
+  },
+  {
+   "ticker": "RKT",
+   "date": "2020-09-30",
+   "status": "DETECTOR_SUSPECT",
+   "label": "3:1"
+  },
+  {
+   "ticker": "RTX",
+   "date": "2020-04-03",
+   "status": "FEED_UNCONFIRMED",
+   "label": "1.6:1"
+  },
+  {
+   "ticker": "SATS",
+   "date": "2019-09-11",
+   "status": "FEED_FRACTIONAL_REVIEW",
+   "label": "1.25:1"
+  },
+  {
+   "ticker": "SE",
+   "date": "2018-01-05",
+   "status": "DETECTOR_SUSPECT",
+   "label": "3:1"
+  },
+  {
+   "ticker": "SGI",
+   "date": "2020-11-24",
+   "status": "FEED_UNCONFIRMED",
+   "label": "4:1"
+  },
+  {
+   "ticker": "SKM",
+   "date": "2021-11-30",
+   "status": "FEED_FRACTIONAL_REVIEW",
+   "label": "1:1.67"
+  },
+  {
+   "ticker": "SLS",
+   "date": "2019-11-08",
+   "status": "FEED_UNCONFIRMED",
+   "label": "1:50"
+  },
+  {
+   "ticker": "SNOW",
+   "date": "2020-09-22",
+   "status": "DETECTOR_SUSPECT",
+   "label": "1:10"
+  },
+  {
+   "ticker": "T",
+   "date": "2022-04-11",
+   "status": "FEED_FRACTIONAL_REVIEW",
+   "label": "1.33:1"
+  },
+  {
+   "ticker": "TAL",
+   "date": "2016-12-01",
+   "status": "DETECTOR_SUSPECT",
+   "label": "1:5"
+  },
+  {
+   "ticker": "TE",
+   "date": "2025-03-04",
+   "status": "DETECTOR_SUSPECT",
+   "label": "20:1"
+  },
+  {
+   "ticker": "UCO",
+   "date": "2020-04-21",
+   "status": "FEED_UNCONFIRMED",
+   "label": "1:25"
+  },
+  {
+   "ticker": "UNIT",
+   "date": "2025-08-04",
+   "status": "FEED_FRACTIONAL_REVIEW",
+   "label": "1:1.67"
+  },
+  {
+   "ticker": "VXX",
+   "date": "2016-08-09",
+   "status": "DETECTOR_SUSPECT",
+   "label": "1:4"
+  },
+  {
+   "ticker": "VXX",
+   "date": "2017-08-23",
+   "status": "DETECTOR_SUSPECT",
+   "label": "1:4"
+  },
+  {
+   "ticker": "WDC",
+   "date": "2025-02-24",
+   "status": "FEED_FRACTIONAL_REVIEW",
+   "label": "1.33:1"
+  },
+  {
+   "ticker": "WOLF",
+   "date": "2025-09-30",
+   "status": "DETECTOR_SUSPECT",
+   "label": "1:25"
+  },
+  {
+   "ticker": "XLF",
+   "date": "2016-09-19",
+   "status": "FEED_FRACTIONAL_REVIEW",
+   "label": "1.25:1"
+  },
+  {
+   "ticker": "Z",
+   "date": "2015-08-17",
+   "status": "DETECTOR_SUSPECT",
+   "label": "3:1"
+  }
  ]
 }

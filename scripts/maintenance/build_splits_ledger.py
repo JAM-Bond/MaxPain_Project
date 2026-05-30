@@ -51,6 +51,7 @@ from lib.corporate_actions import fetch_splits           # noqa: E402
 ROOT = Path.home() / "MaxPain_Project"
 BY_TICKER = ROOT / "data/orats/by_ticker"
 LEDGER_PATH = ROOT / "config/splits_ledger.csv"
+LEDGER_META = ROOT / "config/splits_ledger.meta.json"
 MANUAL_PATH = ROOT / "config/splits_manual.csv"
 LEGACY_MANUAL = ROOT / "data/profile/splits_manual.csv"   # pre-migration location
 COHORT_PATH = ROOT / "data/profile/research_cohort_v15.parquet"
@@ -209,12 +210,59 @@ def live_set() -> set[str]:
         return set()
 
 
+def _prior_keys(ledger_path: Path) -> set[tuple[str, str]]:
+    """(ticker, date) of adjustment-worthy splits in the existing ledger."""
+    if not ledger_path.exists():
+        return set()
+    try:
+        df = pd.read_csv(ledger_path)
+        return {(str(r.ticker).upper(), str(r.date)) for r in df.itertuples()}
+    except Exception:
+        return set()
+
+
+def _prior_flag_keys(meta_path: Path) -> set[tuple[str, str, str]]:
+    """(ticker, date, status) of flagged (non-ledger) items recorded last run."""
+    if not meta_path.exists():
+        return set()
+    try:
+        import json
+        flags = json.loads(meta_path.read_text()).get("flagged", [])
+        return {(f["ticker"].upper(), f["date"], f["status"]) for f in flags}
+    except Exception:
+        return set()
+
+
+def _send_change_alert(new_splits, new_flags, live):
+    """Email the human when the ledger gains a split or a live-name flag."""
+    from lib.email_alert import send_html_alert
+    lines = []
+    if new_splits:
+        lines.append("NEW splits added to the adjustment ledger:")
+        for t, d, lbl in new_splits:
+            tag = "  ◀ LIVE COHORT" if t in live else ""
+            lines.append(f"  {t:6} {d}  {lbl}{tag}")
+    if new_flags:
+        lines.append("\nNEW flagged items needing review (NOT auto-applied):")
+        for t, d, st, lbl in new_flags:
+            tag = "  ◀ LIVE COHORT" if t in live else ""
+            lines.append(f"  {t:6} {d}  {st}  {lbl}{tag}")
+    lines.append("\nReview: config/splits_ledger.csv + latest reports/splits_reconciliation_*.md")
+    body = "\n".join(lines)
+    n_live = sum(1 for x in new_splits if x[0] in live) + sum(1 for x in new_flags if x[0] in live)
+    subj = f"MaxPain Splits — {len(new_splits)} new, {len(new_flags)} flagged" + (f" ({n_live} LIVE)" if n_live else "")
+    send_html_alert(subject=subj, text_body=body,
+                    html_body=f"<pre style='font-family:Menlo,monospace;font-size:13px'>{body}</pre>")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("tickers", nargs="*")
     ap.add_argument("--cohort", action="store_true", help="only the 37 live cohort names")
     ap.add_argument("--no-network", action="store_true", help="detector+manual only (skip feed)")
     ap.add_argument("--sleep", type=float, default=0.0, help="seconds between feed calls")
+    ap.add_argument("--alert", action="store_true",
+                    help="email when new splits or new live-name flags appear vs the prior ledger")
     ap.add_argument("--quiet", action="store_true")
     args = ap.parse_args()
 
@@ -222,6 +270,10 @@ def main() -> int:
     manual = load_manual()
     tickers = resolve_tickers(args)
     live = live_set()
+
+    # Snapshot prior state (for --alert diff) BEFORE we overwrite anything.
+    prior_splits = _prior_keys(LEDGER_PATH)
+    prior_flags = _prior_flag_keys(LEDGER_META)
 
     all_rows: list[dict] = []
     n_feed_ok = n_feed_unavail = 0
@@ -261,7 +313,10 @@ def main() -> int:
             "n_tickers": int(df["ticker"].nunique()),
             "scope": "cohort" if args.cohort else ("explicit" if args.tickers else "all_by_ticker"),
             "tally": {k: int(v) for k, v in tally.items()},
-            "reconciled_tickers": sorted({t.upper() for t in tickers})}
+            "reconciled_tickers": sorted({t.upper() for t in tickers}),
+            "flagged": [{"ticker": r["ticker"], "date": pd.Timestamp(r["date"]).strftime("%Y-%m-%d"),
+                         "status": r["status"], "label": r.get("label", "")}
+                        for _, r in flagged.iterrows()]}
     (LEDGER_PATH.parent / "splits_ledger.meta.json").write_text(json.dumps(meta, indent=1))
     print("=" * 72)
     print(f"  Split ledger: {len(out)} adjustment-worthy splits across {ledger_rows['ticker'].nunique()} tickers")
@@ -339,6 +394,26 @@ def main() -> int:
              f"Rejected/review items are deliberately excluded from price adjustment.\n")
     report.write_text("\n".join(L))
     print(f"  Wrote {report.relative_to(ROOT)}")
+
+    # --alert: email only when something actually changed vs the prior ledger.
+    if args.alert:
+        new_splits = [(str(r.ticker).upper(), str(r.date), r.label)
+                      for r in out.itertuples()
+                      if (str(r.ticker).upper(), str(r.date)) not in prior_splits]
+        new_flags = [(r["ticker"].upper(), pd.Timestamp(r["date"]).strftime("%Y-%m-%d"),
+                      r["status"], r.get("label", ""))
+                     for _, r in flagged.iterrows()
+                     if (r["ticker"].upper(), pd.Timestamp(r["date"]).strftime("%Y-%m-%d"),
+                         r["status"]) not in prior_flags]
+        new_live_flags = [f for f in new_flags if f[0] in live]
+        if new_splits or new_live_flags:
+            try:
+                _send_change_alert(new_splits, new_live_flags, live)
+                print(f"  ✉ Alert sent: {len(new_splits)} new split(s), {len(new_live_flags)} new live flag(s)")
+            except Exception as e:
+                print(f"  alert send failed (non-fatal): {e}")
+        else:
+            print("  ✓ No ledger changes vs prior — no alert.")
     print("=" * 72)
     return 0
 

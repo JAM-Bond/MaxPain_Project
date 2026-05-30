@@ -1,7 +1,7 @@
 # Split-ledger reconciliation (2026-05-29)
 
-- Tickers scanned: 635 | adjustment-worthy splits: 160 | feed ok: 635 | feed unavail: 0
-- Status tally: CONFIRMED=130, DETECTOR_SUSPECT=35, FEED_FRACTIONAL_REVIEW=15, FEED_ONLY=28, FEED_UNCONFIRMED=11, MANUAL=2, OUT_OF_RANGE=26
+- Tickers scanned: 646 | adjustment-worthy splits: 161 | feed ok: 646 | feed unavail: 0
+- Status tally: CONFIRMED=131, DETECTOR_SUSPECT=35, FEED_FRACTIONAL_REVIEW=15, FEED_ONLY=28, FEED_UNCONFIRMED=12, MANUAL=2, OUT_OF_RANGE=26
 
 
 ## Detector-missed splits, price-confirmed & promoted
@@ -41,6 +41,7 @@
 
 | ticker | ex-date | split | live cohort |
 |---|---|---|---|
+| BKSY | 2024-09-09 | 1:8 |  |
 | ET | 2014-01-27 | 2:1 |  |
 | ET | 2015-07-27 | 2:1 |  |
 | FCEL | 2019-05-09 | 1:12 |  |
