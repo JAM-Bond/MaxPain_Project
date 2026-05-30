@@ -85,6 +85,8 @@ If null, none of these may be run as a rescue without a fresh sealed pre-reg: sw
 
 Sealed (IV-rank midpoint, Gate-A $0.05/sh, persistence 126d, Gate-B reconstruction). Build artifacts in §9 may be implemented.
 
+**RESULT 2026-05-30 — REJECT.** `reports/bearcall_live_state_filter_2026-05-30.md`. On 1,332 Gate-B-eligible OTM cycles: LIVE-state lift **−$0.071/sh (Gate A FAIL)**, below the placebo 95th (+0.080, **C FAIL**), 0/4 walk-forward (**D FAIL**), IV-rank ablation **−$0.018 (F FAIL** — the new ingredient hurts). Mechanism falsified: RECOVERED cell −$0.128 is *less* bad than LIVE −$0.235 (Gate E technically true but backwards). **Deeper finding:** Gate-B-eligible cycles themselves average **−$0.165/sh** forward — the pipeline's bear-call walk-forward selection does not persist out-of-sample (look-back bias at the pipeline level). 6th independent bear rejection.
+
 ## 11. Cross-references
 - `scripts/maintenance/auto_promotion_gate_check.py` — the walk-forward Gate B this filter sits on top of.
 - `scripts/qualifier/gate_config.py` `COHORT_BEAR_CALL` — the candidate set.
