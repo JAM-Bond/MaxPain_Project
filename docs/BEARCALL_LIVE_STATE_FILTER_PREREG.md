@@ -1,6 +1,6 @@
 # Pre-Registration — A "Live-State" Filter on Auto-Promoted Bear-Call Candidates
 
-**Status: DRAFT — UNSEALED.** Review §6/§8 thresholds, adjust, then seal (commit) BEFORE running. Sealing is the user's act.
+**Status: SEALED 2026-05-30 by user.** Thresholds in §5/§6 are frozen (IV-rank ≥ 50th pctile, Gate-A lift ≥ $0.05/sh, persistence window 126d, eligible set = reconstructed Gate-B-as-of-entry). Build artifacts in §9 may be implemented; the gates and decision rule were fixed BEFORE the run.
 
 Author drafted: 2026-05-30 (Opus 4.8 session). Grounded in the existing auto-promotion mechanism, not a hand-derived chart pattern. Conceptually distinct from the five prior weakness-based bear rejections (see §3).
 
@@ -41,7 +41,7 @@ Mixed, leaning skeptical-but-plausible. Skeptical: five straight rejections of w
 ## 5. Definitions (FIXED before sealing — no measure-shopping after)
 
 All on split-clean, gap-filled adjusted close ([[reference_split_ledger]]).
-- **Eligible candidate set:** bear-call cycles on names that pass the pipeline's walk-forward Gate B *as of each cycle's entry date* (reconstructable from the walk-forward runner), OR — if that reconstruction is impractical — all bear-call cycles in `data/profile/bear_call_moneyness_results.parquet`, with eligibility reported as a robustness cut. (Decide at seal; default = the full bear-call substrate, eligibility as a secondary cut.)
+- **Eligible candidate set (SEALED — reconstructed Gate-B-as-of-entry):** a bear-call cycle enters the test only if its name passed Gate B using data STRICTLY BEFORE the cycle's walk-forward window — for a cycle in window W, the name qualified on the splits *prior* to W (≥3/4 of prior splits positive, most-recent prior-split mean ≥ $5/contract, val_n ≥ 12). This keeps eligibility itself out-of-sample (no look-ahead). The full bear-call substrate (`data/profile/bear_call_moneyness_results.parquet`) is the universe; only Gate-B-eligible-as-of-entry cycles are evaluated. Cycles in the earliest window (no prior splits) are excluded.
 - **LIVE-state filter (all three required):**
   1. **Falling downtrend:** entry close < 200-DMA AND 200-DMA slope over trailing 21 trading days < 0.
   2. **Persistent relative weakness:** trailing **126-day** return of (name / SPY) < 0 (underperformed the market over ~6 months — *persistent*, not transient).
@@ -81,9 +81,9 @@ If null, none of these may be run as a rescue without a fresh sealed pre-reg: sw
 
 ## 10. Sign-off
 
-**Drafted by:** Claude Opus 4.8 (1M context) · **Drafted:** 2026-05-30 · **Sealed-by:** _pending — user_ · **Sealed-on:** _pending_
+**Drafted by:** Claude Opus 4.8 (1M context) · **Drafted:** 2026-05-30 · **Sealed-by:** user · **Sealed-on:** 2026-05-30
 
-Unsealed. No build artifacts until sealed.
+Sealed (IV-rank midpoint, Gate-A $0.05/sh, persistence 126d, Gate-B reconstruction). Build artifacts in §9 may be implemented.
 
 ## 11. Cross-references
 - `scripts/maintenance/auto_promotion_gate_check.py` — the walk-forward Gate B this filter sits on top of.
