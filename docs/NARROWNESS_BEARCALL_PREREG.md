@@ -1,8 +1,8 @@
 # Pre-Registration — Market Narrowness as a Conditional Bear-Call Modifier
 
-**Status: PARKED 2026-05-30 (never sealed, never run).** The *live motivation* dissolved before sealing: the user's own RSP-vs-SPY overlay showed the rally is **broad**, not narrow — the bullish resolution of the 2026-05-11 breadth divergence the user had pre-identified (see `project_breadth_divergence_20260511`). With narrowness not actually elevated, the discretionary "stealth soft bear" premise this pre-reg was built to validate is not currently operative, so there is nothing live to test against. The **historical** question (§2) remains valid and the design below is preserved intact — un-park and seal only if a future regime re-presents genuine top-tercile narrowness. Note also: the primary signal here needs RSP history, and `data/orats/by_ticker/RSP.parquet` is currently MISSING — a one-time extract is a prerequisite to running it.
+**Status: PARKED 2026-05-29 (never sealed, never run).** The *live motivation* dissolved before sealing: the user's own RSP-vs-SPY overlay showed the rally is **broad**, not narrow — the bullish resolution of the 2026-05-11 breadth divergence the user had pre-identified (see `project_breadth_divergence_20260511`). With narrowness not actually elevated, the discretionary "stealth soft bear" premise this pre-reg was built to validate is not currently operative, so there is nothing live to test against. The **historical** question (§2) remains valid and the design below is preserved intact — un-park and seal only if a future regime re-presents genuine top-tercile narrowness. Note also: the primary signal here needs RSP history, and `data/orats/by_ticker/RSP.parquet` is currently MISSING — a one-time extract is a prerequisite to running it.
 
-Author drafted: 2026-05-29 (Opus 4.8 session). Parked: 2026-05-30. Conceptual basis distinct from all prior bear-call work (see §3).
+Author drafted: 2026-05-29 (Opus 4.8 session). Parked: 2026-05-29. Conceptual basis distinct from all prior bear-call work (see §3).
 
 ---
 

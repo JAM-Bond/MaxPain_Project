@@ -1,8 +1,8 @@
 # Pre-Registration — Sector Relative-Strength Persistence over a 45-DTE Horizon
 
-**Status: DRAFT — UNSEALED.** Review §6/§8 thresholds, adjust, then seal (commit) BEFORE running. Sealing is the user's act.
+**Status: SEALED 2026-05-29 by user.** Thresholds in §6/§8 are now frozen. Build artifacts in §12 may be implemented; the gates and decision rule below were fixed BEFORE the run.
 
-Author drafted: 2026-05-30 (Opus 4.8 session). **Directly unblocked by the 2026-05-29/30 split-adjustment fix** — see §5. Conceptually distinct from the rejected sector-ETF bear-call work (see §3).
+Author drafted: 2026-05-29 (Opus 4.8 session). **Directly unblocked by the 2026-05-29 split-adjustment fix** — see §5. Conceptually distinct from the rejected sector-ETF bear-call work (see §3).
 
 ---
 
@@ -42,7 +42,7 @@ Honest expectation: a **weak** persistence signal (small positive TOP−BOTTOM s
 
 ## 5. Why clean data is the precondition (the unblock)
 
-Relative strength is `sector_close / SPY_close`. On the **raw** ORATS `stkPx` archive, 6 of the cohort split during the sample (XLB/XLE/XLK/XLU/XLY 2:1 on **2025-12-05**, SMH 2:1 on 2023-05-05) — each an uncorrected ~−50% discontinuity in the numerator. That injects phantom relative-return shocks on split dates and corrupts every trailing/forward RS window spanning one. The 2026-05-29/30 fix (`lib/adjusted_close.py`, readers migrated in commit `f4f551b`) removes exactly this. **This pre-reg MUST compute every close via `lib.adjusted_close.load_adjusted_close` — never raw `stkPx`.** (Concrete proof it matters: post-fix XLU reads +0.4% vs its 200-DMA; raw read −28.3%.)
+Relative strength is `sector_close / SPY_close`. On the **raw** ORATS `stkPx` archive, 6 of the cohort split during the sample (XLB/XLE/XLK/XLU/XLY 2:1 on **2025-12-05**, SMH 2:1 on 2023-05-05) — each an uncorrected ~−50% discontinuity in the numerator. That injects phantom relative-return shocks on split dates and corrupts every trailing/forward RS window spanning one. The 2026-05-29 fix (`lib/adjusted_close.py`, readers migrated in commit `f4f551b`) removes exactly this. **This pre-reg MUST compute every close via `lib.adjusted_close.load_adjusted_close` — never raw `stkPx`.** (Concrete proof it matters: post-fix XLU reads +0.4% vs its 200-DMA; raw read −28.3%.)
 
 ## 6. Signal definitions (FIXED before sealing — no measure-shopping after)
 
@@ -122,11 +122,11 @@ This study informs **posture and selection**, never a direct structure promotion
 ## 13. Sign-off
 
 **Drafted by:** Claude Opus 4.8 (1M context)
-**Drafted on:** 2026-05-30
-**Sealed-by:** _pending — user_
-**Sealed-on:** _pending_
+**Drafted on:** 2026-05-29
+**Sealed-by:** user
+**Sealed-on:** 2026-05-29
 
-Unsealed. No build artifacts until sealed.
+Sealed as-is (no threshold edits). Build artifacts in §12 may be implemented.
 
 ## 14. Cross-references
 
