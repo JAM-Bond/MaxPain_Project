@@ -200,7 +200,8 @@ def _load_backfill() -> dict[str, pd.Series]:
         for r in csv.DictReader(f):
             t = r["ticker"].strip().upper()
             out.setdefault(t, []).append((pd.Timestamp(r["date"]), float(r["close"])))
-    return {t: pd.Series(dict(v)).sort_index() for t, v in out.items()}
+    return {t: pd.Series(dict(v)).rename_axis("trade_date").sort_index()
+            for t, v in out.items()}
 
 
 def load_adjusted_close(ticker: str, by_ticker_dir: Path = BY_TICKER) -> pd.Series:
@@ -212,7 +213,11 @@ def load_adjusted_close(ticker: str, by_ticker_dir: Path = BY_TICKER) -> pd.Seri
     bf = _load_backfill().get(ticker.upper())
     if bf is not None and by_ticker_dir == BY_TICKER:
         s = s.combine_first(bf).sort_index()   # fills only dates missing from ORATS
-    return back_adjust(s, _splits_for(ticker, s))
+    out = back_adjust(s, _splits_for(ticker, s))
+    # Contract: callers depend on the index being named 'trade_date'. combine_first
+    # with the backfill series can drop the name (e.g. GOLD's 189-day gap-fill),
+    # so guarantee it here rather than at every call site.
+    return out.rename_axis("trade_date")
 
 
 if __name__ == "__main__":
