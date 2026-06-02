@@ -1,11 +1,11 @@
 {
- "built": "2026-05-29",
+ "built": "2026-06-01",
  "n_tickers": 164,
  "scope": "all_by_ticker",
  "tally": {
-  "CONFIRMED": 131,
+  "CONFIRMED": 133,
   "DETECTOR_SUSPECT": 35,
-  "FEED_ONLY": 28,
+  "FEED_ONLY": 26,
   "OUT_OF_RANGE": 26,
   "FEED_FRACTIONAL_REVIEW": 15,
   "FEED_UNCONFIRMED": 12,
