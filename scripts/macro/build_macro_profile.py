@@ -29,6 +29,7 @@ ROOT = Path.home() / "MaxPain_Project"
 BETA_252_PATH = ROOT / "data/macro/beta_rolling_252d.parquet"
 SUMMARY_PATH = ROOT / "data/macro/beta_regime_summary.parquet"
 TAGS_PATH = ROOT / "data/macro/beta_stability_tags.parquet"
+REGIME_LOAD_PATH = ROOT / "data/macro/regime_loadings.parquet"
 OUT_PATH = ROOT / "data/macro/macro_profile.parquet"
 
 CURRENT_REGIME_DEFAULT = "PLATEAU_CUTS"
@@ -200,6 +201,17 @@ def main():
         rows.append(row)
 
     profile = pd.DataFrame(rows)
+
+    # Graft cross-factor regime-axis loadings (build_regime_axes.py): orthogonal
+    # macro buckets (regime_primary + L_PC1/2/3) for the diversification cap.
+    if REGIME_LOAD_PATH.exists():
+        rl = pd.read_parquet(REGIME_LOAD_PATH)
+        profile = profile.merge(rl, on="ticker", how="left")
+        print(f"  merged regime-axis loadings for {rl['ticker'].nunique()} tickers")
+    else:
+        print(f"  (regime loadings not found at {REGIME_LOAD_PATH}; "
+              f"run build_regime_axes.py first — regime_primary will be absent)")
+
     OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     profile.to_parquet(OUT_PATH, index=False, compression="snappy")
 

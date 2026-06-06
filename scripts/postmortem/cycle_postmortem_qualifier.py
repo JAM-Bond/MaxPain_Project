@@ -607,6 +607,79 @@ def report_directional_outcome(cur, opex):
             print(f"  Realized {pct_change:+.2f}% — consistent with calm/bull entry")
 
 
+def report_macro_attribution(cur, opex):
+    """Per closed position: its macro regime bucket + whether the macro regime
+    (rate axis) was a TAILWIND or HEADWIND over the hold — connects each
+    outcome to macro exposure. Reads lib/macro_profile (data/macro pipeline).
+
+    Complementary to the bundle's `_macro_signature_section`
+    (dashboard/queries/postmortem_bundle.py): that one is the per-SYMBOL static
+    β fingerprint for the AI advisor; THIS one is the per-TRADE outcome
+    attribution over the actual hold window. Both key off regime_primary.
+    """
+    section_header("MACRO ATTRIBUTION (per closed position)")
+    try:
+        import pandas as pd
+        import lib.macro_profile as mp
+        prof = mp.load_profile()
+    except Exception as e:
+        print(f"(macro profile unavailable: {e} — run scripts/macro/daily_refresh.sh)")
+        return
+
+    where = "AND opex_date = ?" if opex else ""
+    params = (opex,) if opex else ()
+    trades = cur.execute(
+        f"""SELECT symbol, spread_type, entry_date, exit_date, final_pnl
+            FROM spread_score_trades
+            WHERE placed = 1 AND spread_type != 'stock' {where}
+            ORDER BY symbol""", params).fetchall()
+    if not trades:
+        print("(no placed=1 closed trades for cycle)")
+        return
+
+    join_path = Path.home() / "MaxPain_Project/data/macro/macro_join_13y.parquet"
+    try:
+        lvl = (pd.read_parquet(join_path, columns=["date", "DGS10"])
+               .drop_duplicates("date"))
+        lvl["date"] = pd.to_datetime(lvl["date"])
+        lvl = lvl.set_index("date").sort_index()["DGS10"]
+    except Exception as e:
+        print(f"(factor levels unavailable: {e})")
+        return
+
+    def asof(d):
+        s = lvl.loc[:pd.to_datetime(d)]
+        return float(s.iloc[-1]) if len(s) else None
+
+    tail = head = 0
+    for t in trades:
+        row = prof[prof["ticker"] == t["symbol"]]
+        prim = row.iloc[0].get("regime_primary", "?") if not row.empty else "no-profile"
+        d0, d1 = t["entry_date"], (t["exit_date"] or opex)
+        verdict = ""
+        d_rate = None
+        if not row.empty and d0 and d1:
+            r = row.iloc[0]
+            g0, g1 = asof(d0), asof(d1)
+            b = r.get("beta_dgs10")
+            use = bool(r.get("beta_dgs10_use"))
+            if g0 is not None and g1 is not None and pd.notna(b):
+                d_rate = (g1 - g0) * 100  # bp
+                if use and abs(b) > 0.005 and abs(d_rate) >= 3:
+                    tw = (b > 0) == (d_rate > 0)
+                    verdict = "rate TAILWIND" if tw else "rate HEADWIND"
+                    tail += int(tw); head += int(not tw)
+        pnl = fmt_money(t["final_pnl"]) if t["final_pnl"] is not None else "open"
+        rate_str = f"DGS10 {d_rate:+.0f}bp" if d_rate is not None else "rate n/a"
+        print(f"  {t['symbol']:6} {t['spread_type']:13} pnl={pnl:>10}  "
+              f"{prim:9} {rate_str:14} {verdict}")
+    if tail or head:
+        print(f"\n  Rate-axis among classifiable positions: "
+              f"{tail} tailwind / {head} headwind")
+    print("  (regime bucket = orthogonal cross-factor PCA; rate axis = β_dgs10 × ΔDGS10 "
+          "over the hold)")
+
+
 def main(opex):
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -620,6 +693,7 @@ def main(opex):
     report_signal_state_attribution(cur, opex)
     report_signal_accuracy_scorecard(cur, opex)
     report_directional_outcome(cur, opex)
+    report_macro_attribution(cur, opex)
     report_signal_flips(cur, opex)
 
     conn.close()

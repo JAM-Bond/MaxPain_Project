@@ -98,8 +98,8 @@ COHORT_ZEBRA_TIER2 = [
     "OKE", "LYV", "LNG", "MPC", "ADM", "LIN",
     "EIX", "AZN", "PWR", "SCCO", "TBT", "MTZ",
     "KEYS", "SOXX", "XLK", "SE", "RMBS", "TER",
-    "PSX", "COST",
-]  # auto-promotion update 2026-05-30
+    "PSX", "COST", "CDNS", "TMUS", "AMGN",
+]  # auto-promotion update 2026-06-05
 
 # Per-name overlay AUTO-attach cohort.
 # Names where the V3 (10% OTM put) overlay showed positive cohort-level lift
@@ -326,6 +326,59 @@ VERDICT_SKIP_CONCENTRATION = "SKIP_CONCENTRATION"  # capped by sector-concentrat
 # Detail: project_sector_concentration_cap.md.
 
 SECTOR_CAP_MAX_PER_OPEX = 2
+
+
+# ─── Macro-concentration cap ──────────────────────────────────────────
+#
+# Second diversification axis, orthogonal to the GICS sector cap. Two names
+# in different sectors can still be the same macro bet (e.g. a cruise line
+# and a chipmaker that both load PC1+ = pure reflation plays) — the sector
+# cap can't see that, the regime_primary bucket can. Source: the macro-
+# sensitivity profile's cross-factor PCA regime axes
+# (lib/macro_profile.cohort_macro_concentration; build_regime_axes.py).
+#
+# SOFT cap (chosen 2026-06-04): over-cap names are DOWNSIZED, not skipped.
+# The research (docs/MACRO_REGIME_CONDITIONING_PREREG.md) found macro is a
+# diversification/risk descriptor, NOT a selection/timing edge — a name is
+# not un-tradeable for its macro bucket, we only avoid concentrating capital
+# in one factor. The regime_primary buckets are also coarse (~6 buckets vs
+# ~11 GICS sectors; PC1+ alone holds 16 bull_put names), so a hard SKIP would
+# over-prune whenever one factor dominates a window.
+#
+# Threshold 3 (looser than the sector cap's 2) reflects that the buckets
+# aggregate ~3x more names. Within an over-concentrated bucket, rank by
+# verdict tier (GO > DOWNSIZE) then alphabetical; rank > cap → DOWNSIZE.
+# NEUTRAL / NA buckets are never capped (they aren't a concentrated bet).
+# Runs AFTER the sector cap so it only sees still-actionable rows.
+#
+# Detail: project_macro_sensitivity_profile_research.md.
+#
+# ─── Division of labor between the two caps (decided 2026-06-04) ───
+# The sector cap and the macro cap guard DIFFERENT correlations and neither
+# subsumes the other — keep both, don't merge:
+#   • GICS sector cap   → shared BUSINESS/INDUSTRY risk (AI-capex cycle, bank
+#                         regulation, oil rigs) — binds names in one industry.
+#   • macro cap         → shared MACRO-FACTOR risk (rates/dollar/credit) — binds
+#                         names ACROSS industries (PC2- spans 7 GICS sectors).
+# Empirically (the sector × regime_primary cross-tab): the two AGREE for
+# "pure-macro" sectors (Energy/Financials→PC1+, Materials→PC2-) and DIVERGE for
+# macro-heterogeneous ones (Tech spans 5 buckets). So each cap catches what the
+# other can't.
+#
+# LOAD-BEARING INVARIANT: SECTOR_CAP_MAX_PER_OPEX < MACRO_CAP_MAX_PER_OPEX.
+# Because the macro cap runs after the (hard) sector cap, no single GICS sector
+# can contribute more than SECTOR_CAP_MAX_PER_OPEX names to the actionable set;
+# with that strictly below MACRO_CAP_MAX_PER_OPEX, a macro bucket can only exceed
+# its threshold by drawing from ≥2 sectors — i.e. the macro cap fires ONLY on
+# genuinely cross-sector concentration, never re-penalizing a within-sector
+# cluster the sector cap already thinned. (Cap-exempt ETFs are the one nuance:
+# they bypass the sector cap, but XLE/XLF-type sector ETFs are themselves the
+# cross-cutting instruments the macro cap should catch, so the spirit holds.)
+# If you raise the sector cap to ≥ the macro cap, this guarantee breaks and the
+# two caps start double-pruning pure-macro sectors — apply_macro_concentration_cap
+# logs a warning if the invariant is violated.
+
+MACRO_CAP_MAX_PER_OPEX = 3
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────

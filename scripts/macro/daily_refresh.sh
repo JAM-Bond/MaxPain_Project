@@ -39,9 +39,17 @@ echo "[4/5] build_betas_rolling.py (252d)"
 $PYTHON scripts/macro/build_betas_rolling.py --window 252
 
 echo ""
-echo "[5/5] build_beta_stability.py + build_macro_profile.py"
+echo "[5/6] build_beta_stability.py + build_regime_axes.py"
 $PYTHON scripts/macro/build_beta_stability.py
+$PYTHON scripts/macro/build_regime_axes.py
+
+echo ""
+echo "[6/7] build_macro_profile.py (merges regime-axis loadings)"
 $PYTHON scripts/macro/build_macro_profile.py
+
+echo ""
+echo "[7/7] build_thematic_beta.py (SOXX/QQQ thematic-concentration overlay)"
+$PYTHON scripts/macro/build_thematic_beta.py
 
 echo ""
 echo "Macro-sensitivity refresh complete — $(date '+%Y-%m-%d %H:%M:%S')"

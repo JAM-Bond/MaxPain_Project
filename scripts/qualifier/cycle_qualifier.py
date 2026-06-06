@@ -45,6 +45,7 @@ from scripts.qualifier import gate_config as G  # noqa: E402
 from scripts.qualifier.earnings_calendar import upcoming_earnings  # noqa: E402
 from lib.sector_map import get_sector, is_cap_exempt, ETF_SENTINEL, UNKNOWN_SENTINEL  # noqa: E402
 from lib.adjusted_close import load_adjusted_close  # noqa: E402
+from lib import macro_profile as macro_lib  # noqa: E402
 
 log = logging.getLogger(__name__)
 
@@ -758,6 +759,11 @@ def apply_sector_concentration_cap(rows: list[dict]) -> list[dict]:
     sector_rank_position annotation (e.g. "3 of 4 in financials"). All rows
     receive a `sector` field for audit.
 
+    Paired with apply_macro_concentration_cap, which MUST run after this one:
+    this cap owns within-industry clusters (hard SKIP); the macro cap owns the
+    cross-sector macro-factor residual (soft DOWNSIZE). They guard different
+    correlations — see the "Division of labor" note in gate_config.
+
     Returns the list of rows (mutated in place; same order).
     """
     actionable_set = (G.VERDICT_GO, G.VERDICT_DOWNSIZE)
@@ -814,6 +820,117 @@ def apply_sector_concentration_cap(rows: list[dict]) -> list[dict]:
     return rows
 
 
+# ─── Macro-concentration cap ──────────────────────────────────────────
+
+def apply_macro_concentration_cap(rows: list[dict]) -> list[dict]:
+    """Soft-downsize names that over-concentrate a single macro regime bucket.
+
+    Orthogonal to the GICS sector cap: two names in different sectors can be
+    the same macro bet (both load PC1+ = pure reflation). The regime_primary
+    bucket from the macro-sensitivity profile (lib.macro_profile) catches that.
+
+    SOFT cap (G.MACRO_CAP_MAX_PER_OPEX): for each (opex, regime_primary) group
+    of actionable OpEx-anchored rows, the top-ranked G.MACRO_CAP_MAX_PER_OPEX
+    keep their verdict; the rest are DOWNSIZED (GO → DOWNSIZE at G.SIZE_DOWNSIZE;
+    already-DOWNSIZE rows keep their size and are annotated). Nothing is skipped
+    — macro is a risk descriptor, not a selection edge, and the buckets are
+    coarse. Ranking: verdict tier (GO > DOWNSIZE) then alphabetical.
+
+    NEUTRAL / NA buckets are never capped (not a concentrated bet). Earnings-
+    anchored rows are excluded (different time bucket). Runs AFTER the sector
+    cap so it only sees still-actionable rows.
+
+    Fails open: if the macro profile can't be read, or a symbol has no
+    regime_primary (e.g. a name promoted tonight before the macro refresh),
+    that row is left untouched. Stamps `regime_primary` and
+    `macro_rank_position` on every actionable row for audit.
+
+    DIVISION OF LABOR with the sector cap (see gate_config.MACRO_CAP_MAX_PER_OPEX):
+    the two caps guard DIFFERENT correlations — GICS = shared industry risk,
+    regime_primary = shared macro-factor risk — and neither subsumes the other.
+    This cap MUST run after apply_sector_concentration_cap. Given the invariant
+    SECTOR_CAP_MAX_PER_OPEX < MACRO_CAP_MAX_PER_OPEX, no single GICS sector can
+    contribute more than the sector cap allows to the actionable set, so this cap
+    fires ONLY on cross-sector concentration — it never re-penalizes a
+    within-sector cluster the sector cap already thinned.
+
+    Returns the list of rows (mutated in place; same order).
+    """
+    actionable_set = (G.VERDICT_GO, G.VERDICT_DOWNSIZE)
+    verdict_rank = {G.VERDICT_GO: 0, G.VERDICT_DOWNSIZE: 1}
+
+    # Guard the load-bearing invariant. If the sector cap is ever loosened to
+    # ≥ the macro cap, the "cross-sector only" guarantee above breaks and the
+    # two caps begin double-pruning pure-macro sectors (Energy/Financials/
+    # Materials). Warn loudly rather than silently double-penalize.
+    if G.SECTOR_CAP_MAX_PER_OPEX >= G.MACRO_CAP_MAX_PER_OPEX:
+        log.warning(
+            "Cap invariant violated: SECTOR_CAP_MAX_PER_OPEX (%d) >= "
+            "MACRO_CAP_MAX_PER_OPEX (%d). The macro cap may now double-prune "
+            "within-sector clusters the sector cap already cut. See "
+            "gate_config 'Division of labor' note.",
+            G.SECTOR_CAP_MAX_PER_OPEX, G.MACRO_CAP_MAX_PER_OPEX,
+        )
+
+    try:
+        profile = macro_lib.load_profile()
+    except Exception as e:
+        log.warning("Macro profile unavailable; macro-concentration cap skipped: %s", e)
+        return rows
+    if "regime_primary" not in profile.columns:
+        log.warning("Macro profile has no regime_primary column; cap skipped")
+        return rows
+    primary_by_sym = dict(zip(profile["ticker"], profile["regime_primary"]))
+
+    # Stamp regime_primary on every actionable row for audit; group the
+    # cappable ones (OpEx-anchored, real bucket).
+    groups: dict[tuple, list[dict]] = {}
+    for r in rows:
+        if r.get("verdict") not in actionable_set:
+            continue
+        rp = primary_by_sym.get(r.get("symbol", ""))
+        r["regime_primary"] = rp
+        r.setdefault("macro_rank_position", None)
+        if rp in (None, "NEUTRAL", "NA"):
+            continue
+        opex = r.get("opex")
+        if not opex or "earnings" in str(opex):
+            continue
+        groups.setdefault((opex, rp), []).append(r)
+
+    n_capped = 0
+    for (opex, rp), bucket in groups.items():
+        if len(bucket) <= G.MACRO_CAP_MAX_PER_OPEX:
+            continue
+        ranked = sorted(
+            bucket,
+            key=lambda r: (verdict_rank.get(r["verdict"], 99), r["symbol"]),
+        )
+        total = len(ranked)
+        for idx, r in enumerate(ranked, start=1):
+            r["macro_rank_position"] = f"{idx} of {total} in {rp}"
+            if idx <= G.MACRO_CAP_MAX_PER_OPEX:
+                continue
+            cap_note = (
+                f"macro cap fired ({rp}, {idx}/{total} rank); "
+                f"downsized for regime-bucket concentration"
+            )
+            if r["verdict"] == G.VERDICT_GO:
+                r["verdict"] = G.VERDICT_DOWNSIZE
+                r["size"] = G.SIZE_DOWNSIZE
+            # already-DOWNSIZE rows keep their (already-reduced) size
+            r["reason"] = (
+                (r.get("reason") + " | " + cap_note) if r.get("reason")
+                else cap_note
+            )
+            n_capped += 1
+
+    if n_capped:
+        log.info("Macro-concentration cap downsized %d row(s) for regime-bucket concentration",
+                 n_capped)
+    return rows
+
+
 # ─── Persistence ──────────────────────────────────────────────────────
 
 QUALIFIER_COLUMNS = [
@@ -822,6 +939,7 @@ QUALIFIER_COLUMNS = [
     "verdict", "size", "reason",
     "regime_stage", "regime_h1", "regime_if_gate", "regime_bp_signal",
     "sector", "sector_rank_position",
+    "regime_primary", "macro_rank_position",
 ]
 
 
@@ -852,9 +970,11 @@ def write_qualifier_runs(rows: list[dict], regime: dict, run_date: date,
             PRIMARY KEY (run_date, symbol, structure, window)
         )
     """)
-    # Idempotent column adds for the sector-concentration cap (2026-05-15).
+    # Idempotent column adds for the sector-concentration cap (2026-05-15)
+    # and the macro-concentration cap (2026-06-04).
     existing_cols = {r[1] for r in cur.execute("PRAGMA table_info(cycle_qualifier_runs)").fetchall()}
-    for col_name, col_type in [("sector", "TEXT"), ("sector_rank_position", "TEXT")]:
+    for col_name, col_type in [("sector", "TEXT"), ("sector_rank_position", "TEXT"),
+                               ("regime_primary", "TEXT"), ("macro_rank_position", "TEXT")]:
         if col_name not in existing_cols:
             cur.execute(f"ALTER TABLE cycle_qualifier_runs ADD COLUMN {col_name} {col_type}")
     placeholders = ", ".join(["?"] * len(QUALIFIER_COLUMNS))
@@ -935,6 +1055,11 @@ def main():
     # Sector-concentration cap (max 2 single names per GICS sector per OpEx).
     # Runs after all per-structure verdicts so it sees the full candidate set.
     verdict_rows = apply_sector_concentration_cap(verdict_rows)
+
+    # Macro-concentration cap (soft-downsize beyond G.MACRO_CAP_MAX_PER_OPEX
+    # names per regime_primary bucket per OpEx). Orthogonal to the sector cap;
+    # runs after it so it only re-sizes still-actionable rows.
+    verdict_rows = apply_macro_concentration_cap(verdict_rows)
 
     print()
     print("=" * 78)

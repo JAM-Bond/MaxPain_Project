@@ -307,6 +307,12 @@ def _macro_signature_section(opex: str) -> str:
     Caveat: the profile is as-of-current-build (latest rolling β + stability
     tags). For post-mortems on cycles older than ~30 days the picture may
     have drifted; the signal is most useful when run right after cycle close.
+
+    Complementary to `report_macro_attribution` in
+    scripts/postmortem/cycle_postmortem_qualifier.py: THIS section is the
+    per-SYMBOL static β fingerprint (for the AI advisor); that one is the
+    per-TRADE outcome attribution (rate tailwind/headwind over the actual
+    hold). Both now key off the same canonical regime_primary bucket.
     """
     try:
         from lib.macro_profile import get as macro_get, load_profile
@@ -337,14 +343,14 @@ def _macro_signature_section(opex: str) -> str:
         f"_Profile as-of {as_of.date() if hasattr(as_of, 'date') else as_of}; current regime: **{regime}**._",
         f"_Caveat: profile reflects most-recent rolling β + Phase-3 stability tags, NOT the β as of the trade date._",
         "",
-        "| symbol | β_mkt (tier) | β_dgs10 (tier, use) | β_credit (tier, use) | β_t10yie (tier, use) | dollar | oil | vol | r² |",
-        "|---|---|---|---|---|---|---|---|---|",
+        "| symbol | regime | β_mkt (tier) | β_dgs10 (tier, use) | β_credit (tier, use) | β_t10yie (tier, use) | dollar | oil | vol | r² |",
+        "|---|---|---|---|---|---|---|---|---|---|",
     ]
     for _, r in df.iterrows():
         sym = r["symbol"]
         p = macro_get(sym)
         if p is None:
-            lines.append(f"| {sym} | _not in cohort_ |  |  |  |  |  |  |  |")
+            lines.append(f"| {sym} | — | _not in cohort_ |  |  |  |  |  |  |  |")
             continue
         def fmt(beta, tier, use=None):
             base = f"{beta:+.3f} ({tier}"
@@ -353,6 +359,7 @@ def _macro_signature_section(opex: str) -> str:
             return base + ")"
         lines.append(
             f"| {sym} | "
+            f"{p.get('regime_primary', '—')} | "
             f"{p['beta_mkt']:+.2f} ({p['beta_mkt_tier']}) | "
             f"{fmt(p['beta_dgs10'], p['beta_dgs10_tier'], p['beta_dgs10_use'])} | "
             f"{fmt(p['beta_credit'], p['beta_credit_tier'], p['beta_credit_use'])} | "
@@ -361,10 +368,14 @@ def _macro_signature_section(opex: str) -> str:
             f"{p['r2']:.2f} |"
         )
     lines.append("")
-    lines.append("**How to read:** `β_*_use = ✓` means Phase 3 stability validation passed and the β is "
+    lines.append("**How to read:** `regime` is the name's orthogonal cross-factor PCA bucket "
+                 "(PC1± reflation, PC2± dollar/risk, PC3± credit; NEUTRAL = market-only) — the same "
+                 "axis the qualifier's macro-concentration cap diversifies across. "
+                 "`β_*_use = ✓` means Phase 3 stability validation passed and the β is "
                  "a trustworthy quantitative sizing input. `✗` means the β reverses across rate regimes — "
                  "use the *tier* (POS_HIGH / NEG_MED / etc.) for directional context only, not for "
-                 "quantitative scaling.")
+                 "quantitative scaling. For per-trade rate tailwind/headwind over the actual hold, see the "
+                 "MACRO ATTRIBUTION section of the text post-mortem (cycle_postmortem_qualifier.py).")
     return "\n".join(lines)
 
 

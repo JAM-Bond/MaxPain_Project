@@ -34,7 +34,7 @@ ROOT = Path.home() / "MaxPain_Project"
 SOUL_PATH = ROOT / "config" / "SOUL.md"
 API_KEYS_ENV = ROOT / "config" / "api_keys.env"
 
-VERSION = "v1"
+VERSION = "v2"
 PROMPT_PATH = ROOT / "prompts" / "pre_cycle_commentary" / f"{VERSION}.md"
 
 MODEL = "claude-opus-4-7"

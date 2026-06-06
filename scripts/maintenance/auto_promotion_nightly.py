@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import subprocess
 import sys
 import time
 import traceback
@@ -54,6 +55,23 @@ from scripts.maintenance.auto_promotion_gate_config_writer import (  # noqa: E40
 
 BY_TICKER = ROOT / "data/orats/by_ticker"
 RAW_PARQUET_ROOT = ROOT / "data/orats/parquet"
+
+# Symbols categorically excluded from candidacy — volatility indices and the
+# like that are not tradeable via our equity-option structures. The ORATS-
+# coverage filter (Stage 3b) drops uncovered names on its own; this denylist is
+# an explicit guard in case such a symbol ever appears in the raw archive.
+# NB: do NOT add SPX here — SPX is a legitimate inverted_fly cohort member.
+EXCLUDE_SYMBOLS = {"VIX", "VVIX", "VXN", "RVX"}
+
+# Minimum distinct trade-days of ORATS history for a name to be a candidate.
+# Newly-listed names (e.g. CBRS 5 days, NASA 18, DRAM 33) have a sliver of
+# recent option data — not enough for the walk-forward to form a single
+# completed cycle, so they just return no_data every night. The promotion
+# gates require positive results across ≥3 of 4 annual walk-forward splits, so
+# a name with under ~2 years of history cannot pass regardless; excluding it
+# loses nothing and it auto-qualifies once it has enough history. Cohort
+# members all far exceed this.
+MIN_HISTORY_DAYS = 504  # ~2 trading years
 
 log = logging.getLogger("auto_promotion_nightly")
 
@@ -218,7 +236,8 @@ def _build_email_body(run_date: date,
                        decisions: list, cohort_sizes_after: dict[str, int],
                        safety_violations: list[str],
                        writer_result: dict,
-                       extra_note: str = "") -> tuple[str, str]:
+                       extra_note: str = "",
+                       excluded: list[str] | None = None) -> tuple[str, str]:
     """Returns (text_body, html_body) for send_html_alert().
 
     Promotions and demotions are GROUPED BY STRUCTURE and within each group
@@ -266,6 +285,25 @@ def _build_email_body(run_date: date,
                 text_lines.append(_format_promote_line(d))
         text_lines.append("")
 
+        # Tier-1 advisory: macro-archetype concentration across the promoted SET
+        # (the macro profile was refreshed for these names just above, so newly
+        # promoted tickers are profiled). Soft — flags hidden cross-sector macro
+        # correlation the per-structure grouping can't see. Does NOT block.
+        try:
+            from lib.macro_profile import format_macro_concentration
+            promo_tickers = sorted({d.ticker for d in promoted})
+            conc_lines, _ = format_macro_concentration(promo_tickers)
+        except FileNotFoundError:
+            conc_lines = []          # macro_profile.parquet not built yet — skip
+        except Exception as e:
+            conc_lines = [f"(macro-concentration check failed: {e})"]
+        if conc_lines:
+            text_lines.append("── MACRO CONCENTRATION (promoted set) ──")
+            text_lines.append("  Soft advisory — names below are the same macro bet "
+                               "regardless of sector/structure; size/diversify as one.")
+            text_lines.extend("  " + ln for ln in conc_lines)
+            text_lines.append("")
+
     if demoted:
         text_lines.append(f"DEMOTED ({len(demoted)}) — grouped by structure")
         by_s = _by_structure(demoted)
@@ -283,6 +321,13 @@ def _build_email_body(run_date: date,
         text_lines.append(f"DEMOTE-DEFERRED ({len(deferred)}) — open positions blocking demotion")
         for d in deferred:
             text_lines.append(f"  ⏸ {d.ticker:6s} {d.structure:14s} — {d.reason}")
+        text_lines.append("")
+
+    if excluded:
+        text_lines.append(
+            f"PRE-SCREEN EXCLUDED ({len(excluded)}) — < {MIN_HISTORY_DAYS} "
+            f"trade-days history / denylisted, dropped before walk-forward:")
+        text_lines.append(f"  {', '.join(excluded)}")
         text_lines.append("")
 
     if skipped:
@@ -335,6 +380,8 @@ def main() -> int:
                     help="Skip Stage 3 (historical extract) for new tickers")
     ap.add_argument("--no-email", action="store_true",
                     help="Don't send email summary")
+    ap.add_argument("--skip-macro-refresh", action="store_true",
+                    help="Don't refresh the macro-sensitivity profile after promotions")
     args = ap.parse_args()
 
     logging.basicConfig(level=logging.INFO,
@@ -358,6 +405,77 @@ def main() -> int:
         # log tail). cron does not auto-retry on non-zero, so this is safe — and
         # it covers the case where the email send above itself failed.
         return 1
+
+
+def _history_days(ticker: str) -> int:
+    """Distinct trade-days of ORATS history for a ticker (0 if no parquet)."""
+    p = BY_TICKER / f"{ticker}.parquet"
+    if not p.exists():
+        return 0
+    try:
+        td = pd.read_parquet(p, columns=["trade_date"])["trade_date"]
+        return int(pd.to_datetime(td).nunique())
+    except Exception as e:
+        log.warning("history check failed for %s: %s", ticker, e)
+        return 0
+
+
+MACRO_REFRESH_SCRIPT = ROOT / "scripts/macro/daily_refresh.sh"
+
+
+def _refresh_macro_profile(promoted_tickers: list[str]) -> tuple[bool, str]:
+    """Rebuild the macro-sensitivity profile so tonight's newly-promoted names
+    get a `regime_primary` immediately.
+
+    The macro pipeline derives its universe from the COHORT_* union in
+    gate_config.py (build_prices_daily.py), which the writer just edited, so a
+    full refresh picks up the new names. Without this, a name promoted tonight
+    (22:35 ET) has no regime_primary until the next evening's 19:30 macro
+    refresh — leaving tomorrow morning's qualifier macro-concentration cap
+    blind to it. We shell out to daily_refresh.sh (the canonical, idempotent
+    pipeline) in a subprocess so it reads the freshly-written gate_config.py
+    rather than this process's cached import.
+
+    Returns (ok, note) for the email summary. Never raises — a macro-refresh
+    failure must not fail the nightly, whose core promotion job already
+    succeeded.
+    """
+    if not MACRO_REFRESH_SCRIPT.exists():
+        return False, f"macro refresh skipped: {MACRO_REFRESH_SCRIPT} not found"
+    log.info("Refreshing macro profile for %d newly-promoted name(s): %s",
+             len(promoted_tickers), sorted(set(promoted_tickers)))
+    t = time.time()
+    try:
+        proc = subprocess.run(
+            ["/bin/bash", str(MACRO_REFRESH_SCRIPT)],
+            cwd=str(ROOT), capture_output=True, text=True, timeout=600,
+        )
+    except Exception as e:
+        log.warning("Macro refresh subprocess error: %s", e)
+        return False, f"macro refresh FAILED to launch: {e}"
+    el = time.time() - t
+    if proc.returncode != 0:
+        tail = "\n".join((proc.stderr or proc.stdout or "").splitlines()[-8:])
+        log.warning("Macro refresh exited %d in %.1fs:\n%s",
+                    proc.returncode, el, tail)
+        return False, (f"macro refresh FAILED (exit {proc.returncode}, {el:.0f}s); "
+                       f"new names get regime_primary at next 19:30 refresh. "
+                       f"tail:\n{tail}")
+    # Confirm the new names now carry a regime_primary.
+    profiled = []
+    try:
+        import pandas as _pd
+        prof = _pd.read_parquet(ROOT / "data/macro/macro_profile.parquet")
+        have = set(prof.loc[prof["regime_primary"].notna(), "ticker"]) \
+            if "regime_primary" in prof.columns else set()
+        profiled = sorted(set(promoted_tickers) & have)
+    except Exception as e:
+        log.warning("Could not verify regime_primary post-refresh: %s", e)
+    log.info("Macro refresh complete in %.1fs; %d/%d promoted names now profiled",
+             el, len(profiled), len(set(promoted_tickers)))
+    return True, (f"macro refresh OK ({el:.0f}s); "
+                  f"{len(profiled)}/{len(set(promoted_tickers))} promoted names "
+                  f"now carry regime_primary: {profiled}")
 
 
 def _run(args, run_date: date, snapshot_date: date | None, t0: float) -> int:
@@ -400,6 +518,26 @@ def _run(args, run_date: date, snapshot_date: date | None, t0: float) -> int:
         log.info("Stage 3: --skip-extract; assuming all by_ticker parquets already exist")
     else:
         _extract_new_tickers(batch)
+
+    # ── Stage 3b: drop candidates we can't backtest (data hygiene) ──
+    # Denylisted index symbols, and newly-listed names with too little ORATS
+    # history to form a single walk-forward cycle (→ no_data every night), are
+    # removed BEFORE Stage 4 so they never clutter the SKIP list or waste runs.
+    # Cohort members far exceed MIN_HISTORY_DAYS, so none are wrongly dropped.
+    excluded = []
+    for t in batch:
+        if t in EXCLUDE_SYMBOLS:
+            excluded.append(t)
+        elif _history_days(t) < MIN_HISTORY_DAYS:
+            excluded.append(t)
+    if excluded:
+        ex = set(excluded)
+        batch = [t for t in batch if t not in ex]
+        log.info("Stage 3b: excluded %d candidate(s) — denylisted / "
+                 "< %d trade-days history: %s",
+                 len(excluded), MIN_HISTORY_DAYS, sorted(excluded))
+        if not batch:
+            log.warning("Batch empty after exclusion; nothing to evaluate")
 
     # ── Stage 4: walk-forward per (ticker, structure) ──
     log.info("Stage 4: walk-forward for %d tickers × %d structures = %d runs",
@@ -490,6 +628,7 @@ def _run(args, run_date: date, snapshot_date: date | None, t0: float) -> int:
         writer_result = {"ok": True, "reason": "no changes to apply", "summary": {}}
 
     # ── Stage 5c: audit log + ledger ──
+    macro_note = ""
     changes_path = (AUTO_PROMOTION_DIR /
                     f"changes_{run_date.isoformat()}.parquet")
     if not args.dry_run:
@@ -524,6 +663,19 @@ def _run(args, run_date: date, snapshot_date: date | None, t0: float) -> int:
         update_ledger(ledger_updates, run_date=run_date)
         log.info("Updated ledger for %d tickers", len(ledger_updates))
 
+        # ── Stage 5d: macro-profile refresh for newly-promoted names ──
+        # Only when the writer actually edited gate_config.py (applied_flag) and
+        # at least one name was promoted — so the new names get a regime_primary
+        # before tomorrow morning's qualifier macro-concentration cap runs.
+        if args.skip_macro_refresh:
+            macro_note = "Macro refresh skipped (--skip-macro-refresh)."
+        elif applied_flag and n_prom > 0:
+            promoted_tickers = [d.ticker for d in promotes]
+            ok, macro_note = _refresh_macro_profile(promoted_tickers)
+        elif n_prom > 0 and not applied_flag:
+            macro_note = ("Macro refresh skipped — promotions were NOT applied "
+                          "(safety halt); cohort union unchanged.")
+
     # ── Email summary ──
     runtime_min = (time.time() - t0) / 60.0
     text_body, html_body = _build_email_body(
@@ -535,10 +687,12 @@ def _run(args, run_date: date, snapshot_date: date | None, t0: float) -> int:
         cohort_sizes_after=cohort_sizes_after,
         safety_violations=violations,
         writer_result=writer_result,
+        excluded=excluded,
         extra_note=(f"DRY-RUN — no gate_config writes, no ledger update, "
                     f"no parquet audit log."
                     if args.dry_run else
-                    f"Audit log: {changes_path}"),
+                    (f"Audit log: {changes_path}"
+                     + (f"\n{macro_note}" if macro_note else ""))),
     )
     if not safety_ok:
         subject = _make_subject(run_date, n_prom, n_dem, len(decisions),

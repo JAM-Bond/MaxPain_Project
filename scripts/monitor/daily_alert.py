@@ -61,6 +61,19 @@ def load_recent_regime(conn) -> pd.DataFrame:
     return df.sort_values("snapshot_date").reset_index(drop=True)
 
 
+def load_regime_series(conn) -> pd.DataFrame:
+    """Full regime_state history, newest last. Used by the trajectory-watch
+    layer, which needs a trailing window for slope/persistence plus the whole
+    series for historical-percentile context (regime_state runs ~13yr back).
+    """
+    df = pd.read_sql(
+        "SELECT snapshot_date, spy_pct_to_ma200, spy_ivr_252, spy_vrp, "
+        "spy_term_spread, spy_vix FROM regime_state ORDER BY snapshot_date",
+        conn,
+    )
+    return df.reset_index(drop=True)
+
+
 def detect_regime_events(df: pd.DataFrame) -> list[str]:
     """Compare today's row to yesterday's row; emit human-readable events."""
     if len(df) < 2:
@@ -135,6 +148,114 @@ def summarize_regime(df: pd.DataFrame) -> str:
             f"BP signal={'ON' if t['bull_put_signal_active'] else 'off'}")
 
 
+def plain_language_regime(df: pd.DataFrame) -> list[str]:
+    """Executive-summary, no-acronym translation of the current regime.
+
+    Rendered ABOVE the technical one-liner (summarize_regime) so the alert
+    leads with a read a non-specialist can act on: market direction, how
+    expensive fear is, whether premium is rich, and which of the three
+    strategy switches are live. Fully dynamic — adapts wording to the day's
+    state. See summarize_regime() for the technical version of the same row.
+    """
+    if df.empty:
+        return ["(no regime data)"]
+    t = df.iloc[-1]
+
+    stage = int(t["stage"]) if t["stage"] is not None else 0
+    below = bool(t["below_200dma"])
+    pct = abs(t["spy_pct_to_ma200"]) * 100 if t["spy_pct_to_ma200"] is not None else None
+    spy = t["spy_close"]
+    ivr = t["spy_ivr_252"]
+    vix = t.get("spy_vix") if "spy_vix" in t.index else None
+    vrp = t.get("spy_vrp")
+    bp_on = bool(t["bull_put_signal_active"])
+    h1_on = bool(t["h1_active"])
+    if_on = bool(t["if_gate_active"])
+
+    # Headline by transition stage.
+    headline = {
+        0: "Calm bull market — no regime change underway.",
+        1: "Calm, but early caution flags are starting to show.",
+        2: "The market has slipped below its long-term trend.",
+        3: "Defensive regime — downturn conditions are active.",
+    }.get(stage, "Mixed signals — read the detail below.")
+
+    # Trend sentence.
+    if pct is not None:
+        direction = "below" if below else "above"
+        trend = (f"The S&P 500 closed at ${spy:.2f}, about {pct:.0f}% {direction} "
+                 f"its long-term (200-day) average price")
+        if not below and pct >= 8:
+            trend += " — comfortably uptrending, even a bit stretched."
+        elif not below:
+            trend += " — a healthy uptrend."
+        else:
+            trend += " — a caution sign for the trend."
+    else:
+        trend = f"The S&P 500 closed at ${spy:.2f}."
+
+    # Fear sentence (volatility rank + fear index).
+    fear = ""
+    if ivr is not None:
+        fear_adj = ("Fear is cheap" if ivr < 0.3 else
+                    "Fear is moderate" if ivr < 0.5 else
+                    "Fear is elevated" if ivr < 0.7 else
+                    "Fear is high")
+        fear = (f"{fear_adj}: the volatility-rank gauge sits in the bottom "
+                f"{ivr*100:.0f}% of its past year"
+                if ivr < 0.5 else
+                f"{fear_adj}: the volatility-rank gauge sits at the "
+                f"{ivr*100:.0f}th percentile of its past year")
+        if vix is not None:
+            fear += f", and the market's fear index is {vix:.1f}."
+        else:
+            fear += "."
+
+    # Premium sentence — the paradox worth keeping: low fear can still pay.
+    prem = ""
+    if vrp is not None:
+        if vrp > 0:
+            prem = ("Options are pricing in more movement than the market is actually "
+                    "delivering, so the premium collected is rich relative to the real risk.")
+        else:
+            prem = ("The market is moving more than options are pricing in, so premium is "
+                    "thin relative to the risk being taken.")
+
+    # Strategy switches — the real signal is as much in what is OFF as what is ON.
+    labels = [
+        ("the income strategy (selling put spreads)", bp_on),
+        ("the downturn strategy (selling call spreads)", h1_on),
+        ("the crash / volatility-spike strategy", if_on),
+    ]
+    on = [n for n, f in labels if f]
+    off = [n for n, f in labels if not f]
+
+    def _join(items: list[str]) -> str:
+        if len(items) == 1:
+            return items[0]
+        if len(items) == 2:
+            return f"{items[0]} and {items[1]}"
+        return ", ".join(items[:-1]) + f", and {items[-1]}"
+
+    if on and off:
+        switches = (f"Of the three strategy switches, {_join(on)} "
+                    f"{'is' if len(on) == 1 else 'are'} live; "
+                    f"{_join(off)} {'stays' if len(off) == 1 else 'stay'} off — "
+                    f"the market sees nothing worth defending against on those fronts.")
+    elif on:
+        switches = f"All three strategy switches are live: {_join(on)}."
+    else:
+        switches = f"All three strategy switches are off ({_join(off)}) — fully stood down."
+
+    lines = [headline, trend]
+    if fear:
+        lines.append(fear)
+    if prem:
+        lines.append(prem)
+    lines.append(switches)
+    return lines
+
+
 def detect_approaching_thresholds(df: pd.DataFrame) -> list[str]:
     """Flag signals near but not yet over their thresholds.
     Complements detect_regime_events (which fires on flips). This fires
@@ -187,6 +308,96 @@ def detect_approaching_thresholds(df: pd.DataFrame) -> list[str]:
         elif vix >= 25:
             events.append(f"VIX {vix:.2f} — significantly elevated")
 
+    return events
+
+
+# ─── Trajectory / WATCH layer ───────────────────────────────────────
+# Early-warning velocity layer. detect_regime_events fires when a signal has
+# ALREADY crossed (today vs yesterday); detect_approaching_thresholds fires
+# when a value is STATICALLY near a line. This one fires when a signal is
+# MOVING TOWARD a decision threshold and, on current pace, would cross it
+# within the horizon — even if it is nowhere near that line today. Together:
+# trending-there (weeks out) → statically-near (days out) → just-crossed.
+#
+# Conservative config (user-selected 2026-06-03): ~10-session horizon, strong
+# persistence (>=6 of last 9 day-over-day steps share the slope direction).
+TRAJ_WINDOW = 10        # trailing sessions for the slope fit
+TRAJ_PERSIST_MIN = 6    # of the 9 day-over-day steps in the window
+TRAJ_HORIZON = 10       # projected crossing must land within this many sessions
+
+# Each entry: which signal, the decision threshold it can cross, the direction
+# that constitutes a warning, display units, and the plain-English consequence.
+_TRAJ_SIGNALS = [
+    {"col": "spy_pct_to_ma200", "label": "SPY vs 200-day average", "thresh": 0.0,
+     "dir": "down", "scale": 100, "suffix": "%", "tfmt": "{:.0f}%",
+     "consequence": "SPY would close below its 200-day average — stage steps to 2 "
+                    "and the downturn-strategy trend condition starts to build"},
+    {"col": "spy_ivr_252", "label": "volatility rank", "thresh": 0.50,
+     "dir": "up", "scale": 1, "suffix": "", "tfmt": "{:.2f}",
+     "consequence": "volatility rank would cross the elevated line (0.50) — the "
+                    "downturn-strategy (H1) fear condition"},
+    {"col": "spy_vrp", "label": "premium cushion (VRP)", "thresh": 0.0,
+     "dir": "down", "scale": 100, "suffix": "pp", "tfmt": "{:.0f}pp",
+     "consequence": "the premium cushion would go negative — the income strategy "
+                    "(selling put spreads) signal switches OFF"},
+    {"col": "spy_term_spread", "label": "term structure", "thresh": 0.0,
+     "dir": "up", "scale": 100, "suffix": "pp", "tfmt": "{:.0f}pp",
+     "consequence": "the volatility curve would invert — the crash-protection gate "
+                    "arms and the income strategy's contango condition breaks"},
+    {"col": "spy_vix", "label": "fear index (VIX)", "thresh": 20.0,
+     "dir": "up", "scale": 1, "suffix": "", "tfmt": "{:.0f}",
+     "consequence": "the fear index would cross into elevated territory (20)"},
+]
+
+
+def detect_trajectory_watch(df: pd.DataFrame) -> list[str]:
+    """Flag regime signals trending toward a decision threshold.
+
+    Fires only when a signal is (a) moving toward its threshold in the
+    warning direction, (b) projected to cross within TRAJ_HORIZON sessions on
+    a simple linear pace, and (c) persistent (>= TRAJ_PERSIST_MIN of the 9
+    day-over-day steps in the window share the slope's sign — the noise gate).
+    `df` is the full regime_state series (load_regime_series); the trailing
+    window drives slope/persistence, the whole series gives the historical
+    percentile shown for context.
+    """
+    import numpy as np
+    if df is None or len(df) < TRAJ_WINDOW + 1:
+        return []
+    events = []
+    for sig in _TRAJ_SIGNALS:
+        s = df[sig["col"]].dropna()
+        if len(s) < TRAJ_WINDOW + 1:
+            continue
+        y = s.tail(TRAJ_WINDOW).to_numpy(dtype=float)
+        slope = float(np.polyfit(np.arange(len(y)), y, 1)[0])  # per session
+        if slope == 0:
+            continue
+        cur = float(y[-1])
+        dist = sig["thresh"] - cur
+        toward = (dist > 0 and slope > 0) or (dist < 0 and slope < 0)
+        if not toward:
+            continue
+        heading = "up" if slope > 0 else "down"
+        if heading != sig["dir"]:
+            continue
+        eta = abs(dist / slope)
+        if eta > TRAJ_HORIZON:
+            continue
+        steps = np.diff(y)  # 9 day-over-day steps
+        persist = int(np.sum(np.sign(steps) == np.sign(slope)))
+        if persist < TRAJ_PERSIST_MIN:
+            continue
+        pctile = float((s < cur).mean() * 100)
+        sc = sig["scale"]
+        sfx = sig["suffix"]
+        thr_s = sig["tfmt"].format(sig["thresh"] * sc)
+        events.append(
+            f"{sig['label']}: {cur*sc:+.2f}{sfx}, trending {heading} "
+            f"~{abs(slope*sc):.2f}{sfx}/session ({persist}/9 days) — on pace to "
+            f"cross {thr_s} in ~{eta:.0f} sessions. {sig['consequence']} "
+            f"[now {pctile:.0f}th percentile of 13-yr range]"
+        )
     return events
 
 
@@ -1132,12 +1343,17 @@ def detect_earnings_risk(positions: pd.DataFrame) -> list[str]:
 
 # ─── Trade-construction enrichment (Schwab-live legs for actionable rows) ─────
 
-def build_construction_enrichment(conn) -> tuple[str, list[str]]:
+def build_construction_enrichment(conn, close_candidate_symbols=None) -> tuple[str, list[str]]:
     """Pull live construction blocks for every actionable GO/DOWNSIZE row in
     the most recent qualifier run with days_until <= 1.
 
+    close_candidate_symbols: names that are regime-🔴 close candidates today.
+    A new bullish rec on such a name gets a CLOSE/OPEN CONFLICT annotation
+    (don't open fresh long-delta into the regime you're closing the other for).
+
     Returns (text_blocks, html_blocks) — text concatenated, HTML as list.
     """
+    close_candidate_symbols = set(close_candidate_symbols or [])
     try:
         latest = conn.execute("SELECT MAX(run_date) FROM cycle_qualifier_runs").fetchone()
     except Exception:
@@ -1210,6 +1426,20 @@ def build_construction_enrichment(conn) -> tuple[str, list[str]]:
         text_parts.append(result["text"])
         if sector_warning:
             text_parts.append(sector_warning)
+        # Close/open reconciliation: this is a NEW bullish entry rec, but if the
+        # same name is ALSO a regime-🔴 close candidate today (an open position
+        # underwater in a stressed regime), opening fresh long-delta fights the
+        # very signal that's closing the other one. Flag it; later-cycle entries
+        # can wait for the regime to clear and a better price.
+        conflict_note = None
+        if r["symbol"] in (close_candidate_symbols or set()):
+            conflict_note = (
+                f"  ⚠ CLOSE/OPEN CONFLICT: {r['symbol']} is ALSO a regime-🔴 close "
+                f"candidate today (open position underwater + stressed regime). "
+                f"Both are bullish {r['symbol']} — defer this new entry until the "
+                f"regime clears; the later-cycle timeframe lets you wait for a better price."
+            )
+            text_parts.append(conflict_note)
         text_parts.append("")
         html_parts.append(result["html"])
         if sector_warning:
@@ -1217,6 +1447,15 @@ def build_construction_enrichment(conn) -> tuple[str, list[str]]:
                 f"<div style='font-size:12px;color:#b58900;margin:4px 0 12px 0;"
                 f"padding:6px 10px;background:#fff8dc;border-left:3px solid #b58900'>"
                 f"{sector_warning.strip()}</div>"
+            )
+        if conflict_note:
+            html_parts.append(
+                f"<div style='font-size:12px;color:#a00;margin:4px 0 12px 0;"
+                f"padding:6px 10px;background:#fdecea;border-left:3px solid #a00'>"
+                f"<b>CLOSE/OPEN CONFLICT</b> — {r['symbol']} is also a regime-🔴 close "
+                f"candidate today (open position underwater in a stressed regime). "
+                f"Both legs are bullish {r['symbol']}; defer this new entry until the "
+                f"regime clears.</div>"
             )
 
         # For ZEBRA rows in the validated AUTO-attach cohort, render the
@@ -1426,25 +1665,41 @@ def main():
     print(f"{'='*72}")
 
     # Regime section
-    print("\n  REGIME")
+    # ── TODAY'S MARKET — executive snapshot of where things stand now ──
+    print("\n  TODAY'S MARKET")
     print(f"  {'-'*68}")
     regime_df = load_recent_regime(conn)
-    print(f"  {summarize_regime(regime_df)}")
-    regime_events = detect_regime_events(regime_df)
-    if regime_events and not all(e.startswith("(") for e in regime_events):
-        print()
-        for ev in regime_events:
-            print(f"  ⚠ {ev}")
-    elif args.verbose:
-        print(f"  (no day-over-day changes)")
+    for line in plain_language_regime(regime_df):
+        print(f"  {line}")
+    print()
+    print(f"  Technical: {summarize_regime(regime_df)}")
 
-    # Approaching-threshold section (early-warning, in-buffer-zone)
+    # ── CHANGING MARKET TRENDS — three-rung early-warning ladder, newest
+    #    rung first: just-changed (vs yesterday) → approaching (in buffer,
+    #    days out) → trending toward (early warning, weeks out). ──
+    regime_events = [e for e in detect_regime_events(regime_df)
+                     if not e.startswith("(")]
     approach_events = detect_approaching_thresholds(regime_df)
-    if approach_events:
-        print(f"\n  APPROACHING THRESHOLDS")
+    trajectory_events = detect_trajectory_watch(load_regime_series(conn))
+    if regime_events or approach_events or trajectory_events:
+        print(f"\n  CHANGING MARKET TRENDS")
         print(f"  {'-'*68}")
-        for ev in approach_events:
-            print(f"  ⓘ {ev}")
+        if regime_events:
+            print(f"  Just changed (vs yesterday):")
+            for ev in regime_events:
+                print(f"    ⚠ {ev}")
+        if approach_events:
+            print(f"  Approaching a threshold (in buffer zone, days out):")
+            for ev in approach_events:
+                print(f"    ⓘ {ev}")
+        if trajectory_events:
+            print(f"  Trending toward a threshold (early warning, weeks out):")
+            for ev in trajectory_events:
+                print(f"    ⏳ {ev}")
+    elif args.verbose:
+        print(f"\n  CHANGING MARKET TRENDS")
+        print(f"  {'-'*68}")
+        print(f"  (no changes, approaching thresholds, or developing trends)")
 
     # Daily Macro Brief (reads Agent_Project ChromaDB — curve / FedWatch /
     # Fed RSS). Soft-fail: never break the alert pipeline if Agent_Project
@@ -1579,6 +1834,7 @@ def main():
     # ad-hoc via CLI. Embedding here surfaces 50%-capture and >25% candidates
     # at alert time, including the natural-vs-mid gap that flagged GS this week.
     close_text = ""
+    close_stress_symbols: list[str] = []   # regime-🔴 close candidates → conflict check
     try:
         from scripts.monitor.close_helper import (
             build_close_block, build_close_candidates_rollup,
@@ -1592,6 +1848,7 @@ def main():
         cand = build_close_candidates_rollup(
             close_block.get("rows", []), conn, date.today().isoformat()
         )
+        close_stress_symbols = cand.get("stress_symbols", [])
         if cand.get("text"):
             print()
             print(cand["text"])
@@ -1616,9 +1873,11 @@ def main():
 
     # All-quiet footer (computed before construction enrichment because we
     # consider construction availability as "not quiet" too).
-    construction_text, construction_html = build_construction_enrichment(conn)
+    construction_text, construction_html = build_construction_enrichment(
+        conn, close_candidate_symbols=close_stress_symbols)
 
-    if (not regime_events and not approach_events and not pos_events
+    if (not regime_events and not approach_events and not trajectory_events
+            and not pos_events
             and not assignment_events and not entry_window_events
             and not exdiv_events and not actionable_earnings
             and not extreme_events and not if_candidates and not dte_events
@@ -1648,7 +1907,7 @@ def main():
     has_events = any(tag in text_body for tag in ("⚠", "REGIME EVENT", "DTE CHECKPOINTS",
                                                    "ENTRY WINDOW", "ASSIGNMENT ZONE",
                                                    "EX-DIV ASSIGNMENT", "EARNINGS RISK",
-                                                   "OPEN POSITIONS"))
+                                                   "OPEN POSITIONS", "CHANGING MARKET TRENDS"))
     quiet = (not n_constructions) and (not has_events)
 
     # Compose subject + HTML always (used by both email + persistence).

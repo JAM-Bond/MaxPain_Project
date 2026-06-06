@@ -356,7 +356,7 @@ def build_close_candidates_rollup(
             candidates.append((r, dte, cues))
 
     if not candidates:
-        return {"text": "", "html": ""}
+        return {"text": "", "html": "", "symbols": [], "stress_symbols": []}
 
     # Text rendering
     lines = ["  CLOSE CANDIDATES TODAY",
@@ -400,7 +400,14 @@ def build_close_candidates_rollup(
         "<table style='border-collapse:collapse;font-size:12px'>"
         f"<tbody>{''.join(rows_html)}</tbody></table></div>"
     )
-    return {"text": text, "html": html}
+    # stress_symbols = names firing the 🔴 (underwater + regime-stressed) cue —
+    # the set that conflicts with a NEW bullish entry recommendation on the same
+    # name today. Profit-take (💰) and T-21 (⏰) closes are NOT conflicts.
+    all_symbols = sorted({r.symbol for r, _, _ in candidates})
+    stress_symbols = sorted({r.symbol for r, _, cues in candidates
+                             if any(c[0] == "🔴" for c in cues)})
+    return {"text": text, "html": html,
+            "symbols": all_symbols, "stress_symbols": stress_symbols}
 
 
 def _t21_actions(rows: list[CloseRow]) -> list[tuple[CloseRow, int, str, str]]:

@@ -69,6 +69,7 @@ SECTOR_OVERRIDES: dict[str, str] = {
     "LULU":  "consumer_discretionary",
     "NKE":   "consumer_discretionary",
     "HD":    "consumer_discretionary",
+    "TOL":   "consumer_discretionary",  # Toll Brothers (backfilled from open book 2026-06-03)
     # ── Consumer Staples ──────────────────────────────────────────────
     "WMT":   "consumer_staples",
     "KO":    "consumer_staples",
@@ -76,12 +77,14 @@ SECTOR_OVERRIDES: dict[str, str] = {
     "EL":    "consumer_staples",
     "TGT":   "consumer_staples",
     "PEP":   "consumer_staples",
+    "STZ":   "consumer_staples",  # Constellation Brands (backfilled from open book 2026-06-03)
     # ── Energy ────────────────────────────────────────────────────────
     "COP":   "energy",
     "DVN":   "energy",
     "XOM":   "energy",
     "CNQ":   "energy",
     "RRC":   "energy",
+    "PSX":   "energy",  # Phillips 66 (backfilled from open book 2026-06-03)
     # ── Financials ────────────────────────────────────────────────────
     "WFC":   "financials",
     "JPM":   "financials",
@@ -90,6 +93,7 @@ SECTOR_OVERRIDES: dict[str, str] = {
     "MS":    "financials",
     "SCHW":  "financials",
     "USB":   "financials",
+    "KKR":   "financials",  # KKR & Co (backfilled from open book 2026-06-03)
     # ── Health Care ───────────────────────────────────────────────────
     "HUM":   "health_care",
     "MRK":   "health_care",
@@ -119,6 +123,8 @@ SECTOR_OVERRIDES: dict[str, str] = {
     "LRCX":  "information_technology",
     "STX":   "information_technology",
     "CSCO":  "information_technology",
+    "AAPL":  "information_technology",  # (backfilled from open book 2026-06-03)
+    "RIOT":  "information_technology",  # Riot Platforms (backfilled from open book 2026-06-03)
     "FSLR":  "information_technology",
     "TTD":   "information_technology",
     "PLTR":  "information_technology",
@@ -156,7 +162,7 @@ SECTOR_OVERRIDES: dict[str, str] = {
     # ── Real Estate ───────────────────────────────────────────────────
     "IYR":   ETF_SENTINEL,
     # ── Utilities (individual names — XLU is ETF) ─────────────────────
-    # Currently no single utility names in the cohort
+    "VST":   "utilities",  # Vistra Corp (backfilled from open book 2026-06-03)
     # ── Communications (legacy telecoms) ──────────────────────────────
     "VZ":    "communication_services",
     "TMUS":  "communication_services",

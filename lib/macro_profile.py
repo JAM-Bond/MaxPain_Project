@@ -24,6 +24,16 @@ import pandas as pd
 
 ROOT = Path.home() / "MaxPain_Project"
 PROFILE_PATH = ROOT / "data/macro/macro_profile.parquet"
+THEMATIC_PATH = ROOT / "data/macro/thematic_beta.parquet"
+
+
+@lru_cache(maxsize=1)
+def load_thematic() -> pd.DataFrame:
+    """Thematic-beta overlay (SOXX/QQQ, market-controlled) from
+    scripts/macro/build_thematic_beta.py. Empty frame if not built yet."""
+    if not THEMATIC_PATH.exists():
+        return pd.DataFrame(columns=["ticker", "soxx_tier", "qqq_tier"])
+    return pd.read_parquet(THEMATIC_PATH)
 
 
 @lru_cache(maxsize=1)
@@ -53,22 +63,107 @@ def cohort_macro_concentration(tickers: list[str]) -> dict:
     if 3 of 4 candidate trades are POS_HIGH on β_dgs10, they're all the same
     rate bet under one ticker symbol diversification.
 
+    The primary dimension is `regime_primary` — the orthogonal cross-factor
+    regime bucket (build_regime_axes.py). It catches names that are macro-
+    correlated ACROSS sectors (e.g. a cruise line and a chipmaker that are both
+    pure reflation plays load PC1+), which the per-factor tiers can miss. The
+    raw-factor tiers are still reported as secondary context.
+
     Returns:
-        {tier_dimension: {tier_label: [ticker, ...]}}
-        e.g., {'beta_dgs10_tier': {'POS_HIGH': ['BAC','JPM','WFC']},
-               'beta_mkt_tier': {'MED_HIGH': ['MSFT','NVDA']}}
-        Only tiers with ≥2 names are returned.
+        {dimension: {bucket_label: [ticker, ...]}}
+        e.g., {'regime_primary': {'PC1+': ['SCHW','APA','STX']},
+               'beta_dgs10_tier': {'POS_HIGH': ['BAC','JPM','WFC']}}
+        Only buckets with ≥2 names are returned. regime_primary first.
     """
     df = load_profile()
     sub = df[df["ticker"].isin(tickers)]
     out: dict = {}
-    for col in ["beta_mkt_tier", "beta_dgs10_tier", "beta_credit_tier",
-                "beta_t10yie_tier", "dollar_tier", "oil_tier", "vol_tier"]:
+    cols = ["beta_mkt_tier", "beta_dgs10_tier", "beta_credit_tier",
+            "beta_t10yie_tier", "dollar_tier", "oil_tier", "vol_tier"]
+    if "regime_primary" in sub.columns:        # orthogonal axis — the primary cap
+        cols = ["regime_primary"] + cols
+    for col in cols:
         groups = sub.groupby(col)["ticker"].apply(list).to_dict()
         dupes = {t: tk for t, tk in groups.items() if len(tk) >= 2 and t not in ("NEUTRAL", "NA")}
         if dupes:
             out[col] = dupes
     return out
+
+
+# Plain-English gloss for the orthogonal macro archetypes (regime_primary).
+# Tied to data/macro/regime_axes.parquet: PC1=+level+infl, PC2=+dollar+vix,
+# PC3=+credit−oil (build_regime_axes.py). Keep in sync if the axes are rebuilt.
+PC_GLOSS = {
+    "PC1+": "reflation / cyclical — rallies on rising rates, inflation, oil",
+    "PC1-": "long-duration growth — rallies on falling rates/inflation",
+    "PC2+": "risk-off defensive — strong dollar, high vol",
+    "PC2-": "risk-on cyclical / commodity — weak dollar, low vol",
+    "PC3+": "credit-spread sensitive",
+    "PC3-": "credit-tightening / oil-up sensitive",
+}
+
+_FACTOR_LABEL = {
+    "beta_dgs10_tier": "rate β",
+    "beta_credit_tier": "credit β",
+    "beta_t10yie_tier": "inflation-exp β",
+    "dollar_tier": "dollar",
+    "oil_tier": "oil",
+    "vol_tier": "vol",
+}
+
+
+def format_macro_concentration(tickers: list[str],
+                               max_factor_lines: int = 4) -> tuple[list[str], int]:
+    """Human-readable macro-concentration advisory for a candidate/promoted set.
+
+    Wraps cohort_macro_concentration() and translates the orthogonal
+    `regime_primary` archetype buckets into plain English. The headline is the
+    archetype — names that are the SAME macro bet across different sectors /
+    structures (the hidden concentration a per-sector cap misses); per-factor
+    tiers follow as secondary context, capped to keep the advisory readable.
+
+    Returns (lines, n_archetype_flags). Empty lines ⇒ no concentration found.
+    """
+    dupes = cohort_macro_concentration(tickers)
+    th = load_thematic()
+    themes = {r.ticker: (r.soxx_tier, r.qqq_tier)
+              for r in th[th["ticker"].isin(tickers)].itertuples()}
+
+    def _ai_exposed(tk: str) -> bool:
+        s, q = themes.get(tk, ("NA", "NA"))
+        return s == "HIGH" or q == "HIGH"
+
+    lines: list[str] = []
+    arche = dupes.get("regime_primary", {})
+    for bucket, names in sorted(arche.items(), key=lambda kv: -len(kv[1])):
+        gloss = PC_GLOSS.get(bucket, "")
+        tail = f" — {gloss}" if gloss else ""
+        lines.append(f"⚠ {len(names)} share archetype {bucket}{tail}: "
+                     f"{', '.join(sorted(names))}  → one macro bet; size/diversify as one")
+        # Thematic split WITHIN the macro group — the "AAPL is the diversifier" line
+        exposed = sorted(n for n in names if _ai_exposed(n))
+        plain = sorted(n for n in names if n in themes and not _ai_exposed(n))
+        if len(exposed) >= 2 and plain:
+            lines.append(f"   ↳ {len(exposed)} of these are AI/growth-exposed "
+                         f"(high SOXX/QQQ-β): {', '.join(exposed)};  "
+                         f"{', '.join(plain)} = the diversifier(s)")
+
+    # Standalone theme clusters across the WHOLE set — catches AI names the macro
+    # archetype splits apart (e.g. NVDA PC1- + PLTR PC3+ both ride AI-growth).
+    for idx, proxy, label, bet in [(0, "SOXX", "AI/semiconductor", "chip"),
+                                   (1, "QQQ", "megacap-growth / AI-software", "growth")]:
+        hi = sorted(tk for tk, tiers in themes.items() if tiers[idx] == "HIGH")
+        if len(hi) >= 2:
+            lines.append(f"⚠ {len(hi)} share HIGH {label}-β ({proxy}): "
+                         f"{', '.join(hi)}  → one {bet} bet")
+
+    factor_lines = []
+    for col, label in _FACTOR_LABEL.items():
+        for tier, names in dupes.get(col, {}).items():
+            factor_lines.append(
+                f"· {len(names)} share {label} {tier}: {', '.join(sorted(names))}")
+    lines.extend(factor_lines[:max_factor_lines])
+    return lines, len(arche)
 
 
 def rate_stress_warning(tickers: list[str], direction: str) -> list[dict]:
