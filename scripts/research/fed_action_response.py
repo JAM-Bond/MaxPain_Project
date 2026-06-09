@@ -247,11 +247,20 @@ def enrich_fedwatch(ev: pd.DataFrame, lead_days: int) -> pd.DataFrame:
 
 # ── forward returns ───────────────────────────────────────────────────────────
 def forward_returns(event_dates: pd.Series, s: pd.Series) -> pd.DataFrame:
-    """close-to-close return from the trading day at/after each event date to +h."""
+    """close-to-close return from the trading day at/after each event date to +h.
+
+    Left-edge guard: events that PRECEDE the series start (short-history / post-IPO
+    tickers — e.g. AFRM begins 2021, PLTR 2020) would otherwise searchsorted to bar 0
+    and fabricate the IPO-window return for every pre-listing FOMC date, inflating N
+    and producing garbage cells. Those events are NaN'd out so a name only contributes
+    the actions that occurred while it was actually trading."""
     idx = s.index
-    pos = idx.searchsorted(pd.DatetimeIndex(event_dates.values), side="left")
+    ev_idx = pd.DatetimeIndex(event_dates.values)
+    pos = idx.searchsorted(ev_idx, side="left")
     out = {"event_date": event_dates.values}
-    base = np.array([s.iloc[i] if 0 <= i < len(s) else np.nan for i in pos])
+    pre_listing = ev_idx < idx[0] if len(idx) else np.ones(len(ev_idx), dtype=bool)
+    base = np.array([np.nan if pre else (s.iloc[i] if 0 <= i < len(s) else np.nan)
+                     for i, pre in zip(pos, pre_listing)])
     for h in HORIZONS:
         fwd = np.array([s.iloc[i + h] if 0 <= i + h < len(s) else np.nan for i in pos])
         out[f"ret_{h}"] = (fwd / base - 1.0) * 100

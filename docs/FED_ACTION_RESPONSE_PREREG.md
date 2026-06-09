@@ -152,3 +152,16 @@ session. Rationale logged so the amendment is auditable.
 - Do not surface a cell without its N + year-mix caveat.
 - Do not wire any output into a gate, cap, or verdict — annotation only.
 - Do not claim a Fed-action effect for any cell flagged regime-driven by H3.
+
+## METHODS CORRECTION 2026-06-10 (during the cohort-extension run, before any cohort verdict)
+
+The cohort run exposed a **left-edge artifact** in `forward_returns`: events that PRECEDE a
+ticker's price-series start (short-history / post-IPO names — AFRM begins 2021-02, PLTR
+2020-10) were `searchsorted`-mapped to bar 0, fabricating the IPO-window return for every
+pre-listing FOMC date. This inflated N to the full count (11 cuts / 20 hikes) for every name
+and produced garbage cells (e.g. PLTR cut T+25 "+70.7%"). Fixed by NaN-ing events before the
+series start so a name only contributes actions that occurred while it was actually trading.
+This is a price-mapping bug, not a threshold/result choice — corrected before reading any
+cohort H1 cell. SPY/QQQ/sector-ETF results (full history since 2013-2016) were unaffected;
+H2/H3 verdicts stand. Caveat retained: a few panel tickers (e.g. `NU`) carry reused-symbol
+history predating the current company's listing — treat per-name N + year-mix as the truth.
