@@ -290,6 +290,25 @@ def _capture_band(c: float) -> str:
     return "🔴"
 
 
+def _cushion_phrase(r: CloseRow) -> str:
+    """Concise 'what's being seen' for a stressed credit vertical — how close spot
+    is to the short strike (the line that decides the trade). Negative = breached."""
+    sk = r.short_strike
+    if not sk or r.spot is None:
+        return "underwater"
+    if r.spread_type.startswith("bull_put"):
+        pct = (r.spot - sk) / sk * 100
+        if pct < 0:
+            return f"spot ${r.spot:.2f} {abs(pct):.1f}% THROUGH short put {sk:g} (breached)"
+        return f"spot ${r.spot:.2f} only {pct:.1f}% above short put {sk:g}"
+    if r.spread_type.startswith("bear_call"):
+        pct = (sk - r.spot) / sk * 100
+        if pct < 0:
+            return f"spot ${r.spot:.2f} {abs(pct):.1f}% THROUGH short call {sk:g} (breached)"
+        return f"spot ${r.spot:.2f} only {pct:.1f}% below short call {sk:g}"
+    return "underwater"
+
+
 def _dte_for(opex_date: str) -> Optional[int]:
     try:
         d = datetime.strptime(opex_date, "%Y-%m-%d").date()
@@ -358,7 +377,9 @@ def build_close_candidates_rollup(
         if dte is not None and dte <= 21:
             cues.append(("⏰", f"T-21 hit (DTE {dte})"))
         if statuses.get(r.id) == "🔴" and r.capture_at_mid < 0:
-            cues.append(("🔴", f"underwater + regime 🔴 (cap {r.capture_at_mid*100:+.0f}%)"))
+            # 'why': concrete observation (strike cushion/breach) + regime, not just
+            # "underwater". cap% is already its own column, so it's not repeated here.
+            cues.append(("🔴", f"{_cushion_phrase(r)}; below 200-DMA (regime 🔴)"))
         if cues:
             candidates.append((r, dte, cues))
 

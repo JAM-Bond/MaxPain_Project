@@ -952,8 +952,12 @@ def _render_bear_call_census(census: dict, cascade: dict) -> list[str]:
     return lines
 
 
-def render_text(assessment: dict) -> list[str]:
-    """Returns a list of email-body lines for the REGIME HEALTH section."""
+def render_text(assessment: dict, collapse_healthy: bool = False) -> list[str]:
+    """Returns a list of email-body lines for the REGIME HEALTH section.
+
+    collapse_healthy: in POSITION HEALTH, show only 🟡/🔴 (needs-attention) positions
+    in full and roll the 🟢 on-trend ones into a single count line — they're already
+    covered by the close-side table, so listing each in full just repeats the book."""
     if assessment.get("error"):
         return [f"  ⚠ Regime health: {assessment['error']}"]
 
@@ -1013,8 +1017,12 @@ def render_text(assessment: dict) -> list[str]:
         lines.append("")
         lines.append(f"  POSITION HEALTH")
         lines.append(f"  {'-'*68}")
+        healthy: list[str] = []
         for fam_name in ("bull_put", "bear_call", "zebra"):
             for p in pos[fam_name]:
+                if collapse_healthy and p["combined_status"] == "🟢":
+                    healthy.append(p["symbol"])
+                    continue
                 head = f"  {p['combined_status']} {p['symbol']} {p['structure']}"
                 if p.get("spot") is not None:
                     lines.append(
@@ -1023,6 +1031,9 @@ def render_text(assessment: dict) -> list[str]:
                     )
                 else:
                     lines.append(f"{head}: {p['name_label']}")
+        if collapse_healthy and healthy:
+            lines.append(f"  🟢 {len(healthy)} on-trend (detail in close-side table): "
+                         f"{', '.join(healthy)}")
 
     # Bear-call census trailer
     if census and cascade:

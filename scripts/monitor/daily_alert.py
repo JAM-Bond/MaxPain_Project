@@ -1837,7 +1837,7 @@ def main():
     # REGIME HEALTH section (system + per-position; persists to history)
     from scripts.monitor.regime_health import assess_all, persist, render_text
     regime_assessment = assess_all(conn, date.today(), positions)
-    regime_health_lines = render_text(regime_assessment)
+    regime_health_lines = render_text(regime_assessment, collapse_healthy=True)
     if regime_health_lines:
         print(f"\n  REGIME HEALTH")
         print(f"  {'-'*68}")

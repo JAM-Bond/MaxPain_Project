@@ -133,16 +133,20 @@ def render_prompts_text(prompts: list[GapPrompt]) -> str:
     if not prompts:
         return ""
     lines = ["", "  PSYCH-GAP-LOG PROMPTS", "  " + "-" * 68]
-    lines.append("  Positions newly at 🟡/🔴 since last log. Report to Claude:")
-    lines.append("  \"[symbol] would_close=Y/N mtm=$X note: …\"")
-    lines.append("")
-    for p in prompts:
-        if p.last_logged_status is None:
-            tail = "(never logged)"
-        else:
-            tail = f"(was {p.last_logged_status} on {p.last_logged_date})"
-        lines.append(
-            f"  {p.current_status}  id={p.trade_id} {p.symbol} "
-            f"{p.structure}  {tail}"
+    lines.append("  Newly 🟡/🔴 since last log (status/why in POSITION HEALTH above).")
+    lines.append("  Report any to Claude: \"[symbol] would_close=Y/N mtm=$X note: …\"")
+    # Compact: group by current status, one wrapped line each — don't repeat the
+    # per-name structure/regime detail already in POSITION HEALTH. Trailing * = a
+    # name never logged before (vs a prior-logged status that has since worsened).
+    def _fmt(ps: list) -> str:
+        return "  ".join(
+            f"{p.symbol}(id {p.trade_id}){'*' if p.last_logged_status is None else ''}"
+            for p in ps
         )
+    reds = [p for p in prompts if p.current_status == "🔴"]
+    yels = [p for p in prompts if p.current_status == "🟡"]
+    if reds:
+        lines.append(f"  🔴 {_fmt(reds)}")
+    if yels:
+        lines.append(f"  🟡 {_fmt(yels)}")
     return "\n".join(lines)
