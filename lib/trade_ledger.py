@@ -22,6 +22,7 @@ Usage:
 from __future__ import annotations
 
 import sqlite3
+from datetime import datetime
 from typing import Literal
 
 import numpy as np
@@ -44,6 +45,59 @@ def ensure_sector_column(conn: sqlite3.Connection) -> None:
     if "sector" not in cols:
         conn.execute("ALTER TABLE spread_score_trades ADD COLUMN sector TEXT")
         conn.commit()
+
+
+# Canonical exit-type vocabulary recorded explicitly at close (vs. inferred).
+# Keep in sync with _classify_exit_type's inferred labels.
+EXIT_TYPES = {
+    "profit_target",   # 50% (verticals) / 50% (IF) credit-capture target fired
+    "t21_managed",     # credit vertical closed at the T-21 time stop
+    "t21_roll",        # zebra rolled at the T-21 cue
+    "t3_5_window",     # OpEx-week (T-3..T-5) managed close
+    "stop_loss",       # STP LMT / discretionary stop hit
+    "expiry",          # settled at expiration
+    "rolled",          # rolled to a later expiry (lineage in roll_from_trade_id if tracked)
+    "manual_close",    # discretionary close, none of the above
+}
+
+
+def ensure_exit_type_column(conn: sqlite3.Connection) -> None:
+    """Idempotently add the `exit_type` column to spread_score_trades. This is the
+    structured close telemetry the ledger spec asks for, so the loader no longer
+    has to INFER the exit reason for trades closed after this lands."""
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(spread_score_trades)")]
+    if "exit_type" not in cols:
+        conn.execute("ALTER TABLE spread_score_trades ADD COLUMN exit_type TEXT")
+        conn.commit()
+
+
+def record_close(conn: sqlite3.Connection, trade_id: int, *, exit_date: str,
+                 exit_type: str, exit_price: float | None = None,
+                 exit_credit: float | None = None, final_pnl: float | None = None,
+                 status: str = "closed") -> dict:
+    """Record a trade close WITH explicit exit-type telemetry (the close-protocol
+    path from feedback_close_trade_protocol). SELECT-confirm-UPDATE: returns the
+    pre-update row so the caller can confirm identity before trusting the write.
+
+    exit_type must be one of EXIT_TYPES — this is the whole point: capture the
+    reason at close instead of inferring it later from DTE heuristics. Raises on an
+    unknown exit_type or a missing/non-open trade."""
+    if exit_type not in EXIT_TYPES:
+        raise ValueError(f"exit_type {exit_type!r} not in {sorted(EXIT_TYPES)}")
+    ensure_exit_type_column(conn)
+    cur = conn.execute(
+        "SELECT id, symbol, spread_type, status, opex_date, entry_credit "
+        "FROM spread_score_trades WHERE id=?", (trade_id,)).fetchone()
+    if cur is None:
+        raise ValueError(f"no trade with id={trade_id}")
+    before = {"id": cur[0], "symbol": cur[1], "spread_type": cur[2],
+              "status": cur[3], "opex_date": cur[4], "entry_credit": cur[5]}
+    conn.execute(
+        "UPDATE spread_score_trades SET exit_date=?, exit_price=?, exit_credit=?, "
+        "final_pnl=?, status=?, exit_type=? WHERE id=?",
+        (exit_date, exit_price, exit_credit, final_pnl, status, exit_type, trade_id))
+    conn.commit()
+    return before
 
 
 def backfill_sectors(conn: sqlite3.Connection, force: bool = False) -> int:
@@ -80,7 +134,7 @@ def _load_trades(conn: sqlite3.Connection) -> pd.DataFrame:
             target_hit_date, target_hit_pnl, target_hit_days_held,
             entry_iv_rank, entry_iv_percentile, entry_vrp, entry_gex_z,
             entry_skew, entry_short_delta, entry_composite, entry_vix,
-            qualifier_run_date
+            qualifier_run_date, exit_type AS exit_type_recorded
         FROM spread_score_trades
     """, conn)
 
@@ -307,7 +361,14 @@ def _classify_exit_type(row: pd.Series) -> str:
 
     Other / stock / unknown:
       open/expiry/managed_close as before.
+
+    If an explicit exit_type was RECORDED at close (`exit_type` column, set by
+    record_close() / the Schwab fills cron), that is authoritative and returned
+    verbatim — we only infer for trades that predate explicit telemetry.
     """
+    recorded = row.get("exit_type_recorded")
+    if isinstance(recorded, str) and recorded.strip():
+        return recorded
     status = (row.get("status") or "").lower()
     if status == "open":
         return "open"
@@ -393,6 +454,7 @@ def load_trade_ledger(conn: sqlite3.Connection) -> pd.DataFrame:
     status='closed'. Open trades get exit-side fields as NaN and
     exit_type='open'.
     """
+    ensure_exit_type_column(conn)  # so _load_trades can SELECT exit_type
     trades = _load_trades(conn)
     regime = _load_regime(conn)
     qual = _load_qualifier(conn)
@@ -401,7 +463,139 @@ def load_trade_ledger(conn: sqlite3.Connection) -> pd.DataFrame:
     out = _attach_regime(trades, regime, when="entry_date", prefix="entry")
     out = _attach_regime(out, regime, when="exit_date", prefix="exit")
     out = _attach_qualifier(out, qual)
+    # Snapshot-at-entry fidelity: where a frozen entry-context row exists, it is
+    # the source of truth (the live recompute above is the fallback for trades
+    # not yet materialized). See snapshot_entry().
+    out = _overlay_entry_snapshot(conn, out)
     mae = _mae_per_trade(marks)
     out = out.merge(mae, on="trade_id", how="left")
     out = _add_derived(out)
     return out
+
+
+# ── Snapshot-at-entry materialization ───────────────────────────────────────
+#
+# project_trade_ledger_learning.md: "the regime + qualifier context fields are
+# populated AT TIME OF ENTRY ... They do NOT update later." The live loader
+# above recomputes those joins on every call, so an old trade's entry context
+# would silently change if regime_state history were later corrected. The
+# trade_ledger_enriched table freezes the entry-side context ONCE (at/after the
+# entry date, when that day's regime_state row exists) and is never updated for a
+# given trade. Exit-side + MAE stay live — they legitimately evolve until close.
+
+ENTRY_REGIME_COLS = [
+    "entry_stage", "entry_spy_pct_to_ma200", "entry_spy_ivr_252",
+    "entry_spy_term_spread", "entry_spy_vrp", "entry_h1_active",
+    "entry_bull_put_signal_active", "entry_if_gate_active",
+    "entry_hard_pause_active", "entry_soft_downsize_active",
+    "entry_below_200dma", "entry_ivr_high", "entry_term_inverted",
+    "entry_spy_vix",
+]
+ENTRY_QUAL_COLS = [
+    "qualifier_verdict", "qualifier_size", "qualifier_reason",
+    "qualifier_regime_stage", "regime_h1", "regime_if_gate", "regime_bp_signal",
+    "qualifier_window", "qualifier_target", "qualifier_days_until", "off_script",
+]
+# TEXT-affinity frozen columns; everything else is numeric.
+_SNAPSHOT_TEXT_COLS = {
+    "qualifier_verdict", "qualifier_reason", "qualifier_window",
+    "qualifier_target",
+}
+_SNAPSHOT_COLS = ENTRY_REGIME_COLS + ENTRY_QUAL_COLS
+
+
+def ensure_enriched_table(conn: sqlite3.Connection) -> None:
+    """Idempotently create trade_ledger_enriched (frozen entry-context store)."""
+    col_defs = ", ".join(
+        f'"{c}" {"TEXT" if c in _SNAPSHOT_TEXT_COLS else "REAL"}'
+        for c in _SNAPSHOT_COLS
+    )
+    conn.execute(
+        f"CREATE TABLE IF NOT EXISTS trade_ledger_enriched ("
+        f"trade_id INTEGER PRIMARY KEY, {col_defs}, snapshotted_at TEXT)"
+    )
+    conn.commit()
+
+
+def _compute_entry_context(conn: sqlite3.Connection) -> pd.DataFrame:
+    """Compute the entry-side context for every trade using the SAME join logic
+    as the live loader (so frozen == what the loader would have produced on the
+    snapshot date). Returns trade_id + the frozen columns."""
+    trades = _load_trades(conn)
+    regime = _load_regime(conn)
+    qual = _load_qualifier(conn)
+    out = _attach_regime(trades, regime, when="entry_date", prefix="entry")
+    out = _attach_qualifier(out, qual)
+    cols = ["trade_id"] + [c for c in _SNAPSHOT_COLS if c in out.columns]
+    return out[cols]
+
+
+def _load_entry_snapshot(conn: sqlite3.Connection) -> pd.DataFrame:
+    """Read the frozen entry-context table (empty df if it doesn't exist yet)."""
+    try:
+        return pd.read_sql_query("SELECT * FROM trade_ledger_enriched", conn)
+    except (pd.errors.DatabaseError, sqlite3.OperationalError):
+        return pd.DataFrame()
+
+
+def _overlay_entry_snapshot(conn: sqlite3.Connection,
+                            out: pd.DataFrame) -> pd.DataFrame:
+    """Hard-overwrite entry-context columns with frozen values for any trade that
+    has a snapshot row. No-op (returns out unchanged) when the table is missing
+    or empty, so behavior is identical to pre-materialization until snapshots
+    exist."""
+    frozen = _load_entry_snapshot(conn)
+    if frozen.empty or "trade_id" not in frozen.columns:
+        return out
+    common = [c for c in _SNAPSHOT_COLS if c in out.columns and c in frozen.columns]
+    if not common:
+        return out
+    out = out.set_index("trade_id")
+    fz = frozen.set_index("trade_id")
+    idx = out.index.intersection(fz.index)
+    for c in common:
+        out.loc[idx, c] = fz.loc[idx, c]
+    return out.reset_index()
+
+
+def snapshot_entry(conn: sqlite3.Connection, refresh: bool = False) -> int:
+    """Freeze entry-side context for trades not yet snapshotted (the at-trade-open
+    materialization). Idempotent: an existing snapshot is NEVER overwritten unless
+    refresh=True (which re-freezes every trade — use only to repair a bug, since
+    it discards the original immutable entry context). Returns rows written.
+
+    Run daily (e.g. piggybacked on the EOD reconcile): a trade placed today has
+    its entry-date regime_state row available by close, so the snapshot captures
+    the correct entry context that same evening."""
+    ensure_enriched_table(conn)
+    ctx = _compute_entry_context(conn)
+    # Defer trades whose entry-date regime_state row doesn't exist yet (e.g. a
+    # trade placed today, snapshotted before the EOD regime pipeline writes the
+    # day's row). Freezing now would lock in NULL entry context forever; instead
+    # we skip and re-attempt on the next daily run once the regime row lands.
+    regime_present = [c for c in ENTRY_REGIME_COLS if c in ctx.columns]
+    if regime_present:
+        ctx = ctx[ctx[regime_present].notna().any(axis=1)]
+    if not refresh:
+        existing = {r[0] for r in conn.execute(
+            "SELECT trade_id FROM trade_ledger_enriched")}
+        ctx = ctx[~ctx["trade_id"].isin(existing)]
+    if ctx.empty:
+        return 0
+    stamp = datetime.now().isoformat(timespec="seconds")
+    cols = [c for c in _SNAPSHOT_COLS if c in ctx.columns]
+    placeholders = ", ".join(["?"] * (len(cols) + 2))
+    collist = ", ".join(['trade_id'] + [f'"{c}"' for c in cols] + ['snapshotted_at'])
+    rows = []
+    for _, r in ctx.iterrows():
+        vals = [int(r["trade_id"])]
+        for c in cols:
+            v = r[c]
+            vals.append(None if pd.isna(v) else (str(v) if c in _SNAPSHOT_TEXT_COLS else float(v) if isinstance(v, (int, float, np.floating)) else str(v)))
+        vals.append(stamp)
+        rows.append(vals)
+    conn.executemany(
+        f"INSERT OR REPLACE INTO trade_ledger_enriched ({collist}) "
+        f"VALUES ({placeholders})", rows)
+    conn.commit()
+    return len(rows)

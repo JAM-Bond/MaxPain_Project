@@ -34,8 +34,14 @@ def collect_symbols() -> list[str]:
 
     conn = connect()
     try:
+        # ALL traded symbols (not just currently-open): a name traded then closed
+        # and dropped from the cohort must stay in the cache so the historical
+        # earnings-overlap analytic (lib.trade_analytics.earnings_overlap) isn't
+        # blind to it. ETFs return empty from yfinance — that's fine, the query
+        # treats covered-ETFs as legitimately no-earnings.
         rows = conn.execute(
-            "SELECT DISTINCT symbol FROM spread_score_trades WHERE status='open'"
+            "SELECT DISTINCT symbol FROM spread_score_trades "
+            "WHERE symbol IS NOT NULL AND spread_type!='stock'"
         ).fetchall()
         syms.update(r[0] for r in rows if r[0])
     finally:

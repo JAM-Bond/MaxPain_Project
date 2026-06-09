@@ -50,8 +50,10 @@ WEEKDAY_JOBS = [
     ("orats_health",            19, 40, f"cd {ROOT} && {PY} scripts/maintenance/orats_health_check.py"),  # after 19:00 ingest; 10:00 false-alarmed daily (ORATS is T+1)
     ("close_prices",            16, 16, f"cd {ROOT} && {PY} scripts/pipeline/update_close_prices.py"),
     ("mark_open_spreads",       16, 20, f"cd {ROOT} && {PY} scripts/pipeline/mark_open_spreads.py"),
+    ("ingest_schwab_fills",     16, 22, f"cd {ROOT} && {PY} -m scripts.maintenance.ingest_schwab_fills"),  # EOD fills/P&L/fees from Schwab Trader API (idempotent; no-op until live option fills)
     ("reconcile_qualifier",     16, 25, f"cd {ROOT} && {PY} scripts/postmortem/reconcile_qualifier_links.py"),
     ("ev_enrich",               16, 35, f"cd {ROOT} && {PY} -m lib.ev_enrich"),  # persist EV-rank before the 16:45 alert reads it
+    ("snapshot_ledger",         16, 40, f"cd {ROOT} && {PY} -m scripts.maintenance.snapshot_trade_ledger"),  # freeze entry-context for newly-placed trades (entry-date regime row exists by EOD)
     ("daily_alert",             16, 45, f"cd {ROOT} && {PY} scripts/monitor/daily_alert.py"),
     ("orats_daily",             19,  0, f"cd {ROOT} && bash scripts/orats/daily_pipeline.sh"),
     ("macro_refresh",           19, 30, f"cd {ROOT} && bash scripts/macro/daily_refresh.sh"),

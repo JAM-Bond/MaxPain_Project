@@ -226,17 +226,26 @@ def earnings_overlap(df: pd.DataFrame, conn: sqlite3.Connection | None = None) -
                                         "scripts/pipeline/refresh_earnings_calendar.py"]})
     cal = pd.read_parquet(cache)
     cal["earnings_date"] = pd.to_datetime(cal["earnings_date"]).dt.normalize()
+    covered = set(cal["ticker"].unique())
     sub = sub.copy()
     sub["entry_date"] = pd.to_datetime(sub["entry_date"]).dt.normalize()
     sub["exit_date"] = pd.to_datetime(sub["exit_date"]).dt.normalize()
 
-    def _has_earnings(row):
-        e = cal[(cal["ticker"] == row["symbol"])
-                & (cal["earnings_date"] >= row["entry_date"])
-                & (cal["earnings_date"] <= row["exit_date"])]
-        return not e.empty
+    from lib.sector_map import get_sector, ETF_SENTINEL  # ETF = legit no-earnings
 
-    sub["earnings_during_hold"] = sub.apply(_has_earnings, axis=1)
+    def _label(row) -> str:
+        sym = row["symbol"]
+        if sym in covered:
+            e = cal[(cal["ticker"] == sym)
+                    & (cal["earnings_date"] >= row["entry_date"])
+                    & (cal["earnings_date"] <= row["exit_date"])]
+            return "earnings_in_hold" if not e.empty else "no_earnings"
+        # not in the calendar at all
+        if get_sector(sym) == ETF_SENTINEL:
+            return "no_earnings"            # ETFs don't report earnings
+        return "unknown_no_calendar"        # single name w/ no cached data — a gap, not a False
+
+    sub["earnings_during_hold"] = sub.apply(_label, axis=1)
     out = sub.groupby("earnings_during_hold", dropna=False).apply(
         _agg, include_groups=False
     )
