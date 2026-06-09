@@ -51,6 +51,7 @@ WEEKDAY_JOBS = [
     ("close_prices",            16, 16, f"cd {ROOT} && {PY} scripts/pipeline/update_close_prices.py"),
     ("mark_open_spreads",       16, 20, f"cd {ROOT} && {PY} scripts/pipeline/mark_open_spreads.py"),
     ("reconcile_qualifier",     16, 25, f"cd {ROOT} && {PY} scripts/postmortem/reconcile_qualifier_links.py"),
+    ("ev_enrich",               16, 35, f"cd {ROOT} && {PY} -m lib.ev_enrich"),  # persist EV-rank before the 16:45 alert reads it
     ("daily_alert",             16, 45, f"cd {ROOT} && {PY} scripts/monitor/daily_alert.py"),
     ("orats_daily",             19,  0, f"cd {ROOT} && bash scripts/orats/daily_pipeline.sh"),
     ("macro_refresh",           19, 30, f"cd {ROOT} && bash scripts/macro/daily_refresh.sh"),

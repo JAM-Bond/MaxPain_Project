@@ -190,6 +190,85 @@ SECTOR_OVERRIDES: dict[str, str] = {
     "AXP":   "financials",
     # ── Health Care (other) ───────────────────────────────────────────
     "DHR":   "health_care",
+    # ── Universe-expansion backfill (2026-06-06; ZEBRA tier-2 + others) ─
+    # GICS sectors pulled from yfinance and normalized to the slugs above.
+    # Covers the ZEBRA tier-2 expansion universe that was added without
+    # sector tags (was driving ~60% _UNKNOWN in the qualifier slate).
+    "AA":    "materials",                 # Alcoa
+    "ADI":   "information_technology",    # Analog Devices
+    "ADM":   "consumer_staples",          # Archer-Daniels-Midland
+    "AFRM":  "financials",                # Affirm
+    "AG":    "materials",                 # First Majestic Silver
+    "ALK":   "industrials",               # Alaska Air
+    "AMGN":  "health_care",               # Amgen
+    "ANET":  "information_technology",    # Arista Networks
+    "APA":   "energy",                    # APA Corp
+    "APO":   "financials",                # Apollo Global
+    "AZN":   "health_care",               # AstraZeneca
+    "BAC":   "financials",                # Bank of America
+    "BHP":   "materials",                 # BHP Group
+    "BP":    "energy",                    # BP
+    "BX":    "financials",                # Blackstone
+    "C":     "financials",                # Citigroup
+    "CAT":   "industrials",               # Caterpillar
+    "CDNS":  "information_technology",    # Cadence Design
+    "CLS":   "information_technology",    # Celestica
+    "COHR":  "information_technology",    # Coherent
+    "COST":  "consumer_staples",          # Costco
+    "CRWD":  "information_technology",    # CrowdStrike
+    "CVX":   "energy",                    # Chevron
+    "DELL":  "information_technology",    # Dell
+    "DOW":   "materials",                 # Dow
+    "EIX":   "utilities",                 # Edison International
+    "EOG":   "energy",                    # EOG Resources
+    "ETN":   "industrials",               # Eaton
+    "FANG":  "energy",                    # Diamondback Energy
+    "GME":   "consumer_discretionary",    # GameStop
+    "HOOD":  "financials",                # Robinhood
+    "HWM":   "industrials",               # Howmet Aerospace
+    "KEYS":  "information_technology",    # Keysight
+    "KR":    "consumer_staples",          # Kroger
+    "LCID":  "consumer_discretionary",    # Lucid
+    "LIN":   "materials",                 # Linde
+    "LNG":   "energy",                    # Cheniere Energy
+    "LYV":   "communication_services",    # Live Nation
+    "MPC":   "energy",                    # Marathon Petroleum
+    "MRVL":  "information_technology",    # Marvell
+    "MTZ":   "industrials",               # MasTec
+    "MU":    "information_technology",    # Micron
+    "NEE":   "utilities",                 # NextEra Energy
+    "NFLX":  "communication_services",    # Netflix (GICS comm svcs)
+    "NU":    "financials",                # Nu Holdings
+    "OKE":   "energy",                    # ONEOK
+    "ORCL":  "information_technology",    # Oracle
+    "PM":    "consumer_staples",          # Philip Morris
+    "PWR":   "industrials",               # Quanta Services
+    "RKLB":  "industrials",               # Rocket Lab
+    "RMBS":  "information_technology",    # Rambus
+    "ROKU":  "communication_services",    # Roku
+    "RTX":   "industrials",               # RTX
+    "SBUX":  "consumer_discretionary",    # Starbucks
+    "SE":    "consumer_discretionary",    # Sea Ltd
+    "TER":   "information_technology",    # Teradyne
+    "TEVA":  "health_care",               # Teva
+    "TSEM":  "information_technology",    # Tower Semiconductor
+    "TTWO":  "communication_services",    # Take-Two
+    "TXN":   "information_technology",    # Texas Instruments
+    "UAL":   "industrials",               # United Airlines
+    "V":     "financials",                # Visa (firm convention; cf. PYPL note)
+    "VLO":   "energy",                    # Valero
+    "WMB":   "energy",                    # Williams Cos
+    "ZTS":   "health_care",               # Zoetis
+    "CL":    "consumer_staples",          # Colgate-Palmolive
+    "CVI":   "energy",                    # CVR Energy
+    "LOW":   "consumer_discretionary",    # Lowe's
+    "NOC":   "industrials",               # Northrop Grumman
+    "URBN":  "consumer_discretionary",    # Urban Outfitters
+    "EWY":   ETF_SENTINEL,                # iShares MSCI South Korea
+    "IEF":   ETF_SENTINEL,                # 7-10yr Treasury
+    "TBT":   ETF_SENTINEL,                # 2x short long Treasury
+    "USO":   ETF_SENTINEL,                # US Oil Fund
+    "XSP":   ETF_SENTINEL,                # Mini-SPX index (cap-exempt)
     # ── Real estate operations (other) ────────────────────────────────
 }
 

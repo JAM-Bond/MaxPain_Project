@@ -1362,12 +1362,16 @@ def build_construction_enrichment(conn, close_candidate_symbols=None) -> tuple[s
         return "", []
 
     df = pd.read_sql_query(f"""
-        SELECT symbol, structure, target, opex, days_until, verdict, reason, sector
+        SELECT symbol, structure, target, opex, days_until, verdict, reason, sector,
+               ev_per_risk, ev_rank_position
         FROM cycle_qualifier_runs
         WHERE run_date = '{latest[0]}'
           AND verdict IN ('GO', 'DOWNSIZE')
           AND days_until <= 1
-        ORDER BY structure, symbol
+        ORDER BY structure,
+                 CASE verdict WHEN 'GO' THEN 0 WHEN 'DOWNSIZE' THEN 1 ELSE 2 END,
+                 ev_per_risk DESC,   -- best reward/risk first; NULL (unscored) sorts last = fail-open to alphabetical
+                 symbol
     """, conn)
     if df.empty:
         return "", []
@@ -1424,6 +1428,12 @@ def build_construction_enrichment(conn, close_candidate_symbols=None) -> tuple[s
             continue
         rendered_symbols.append(r["symbol"])
         text_parts.append(result["text"])
+        # EV-rank annotation (step B): cards are ordered best-reward/risk-first within
+        # each structure; surface the score. Only when scored (fail-open: NULL → no line).
+        if pd.notna(r.get("ev_per_risk")):
+            text_parts.append(
+                f"    ▸ EV reward/risk {r['ev_per_risk']:.2f} "
+                f"(rank {r['ev_rank_position']} in {r['structure']} {r['verdict']} by reward/risk)")
         if sector_warning:
             text_parts.append(sector_warning)
         # Close/open reconciliation: this is a NEW bullish entry rec, but if the
@@ -1442,6 +1452,12 @@ def build_construction_enrichment(conn, close_candidate_symbols=None) -> tuple[s
             text_parts.append(conflict_note)
         text_parts.append("")
         html_parts.append(result["html"])
+        if pd.notna(r.get("ev_per_risk")):
+            html_parts.append(
+                f"<div style='font-size:12px;color:#1a5fb4;margin:2px 0 8px 0;"
+                f"padding:4px 10px;background:#f0f6ff;border-left:3px solid #1a5fb4'>"
+                f"▸ EV reward/risk <b>{r['ev_per_risk']:.2f}</b> "
+                f"(rank {r['ev_rank_position']} in {r['structure']} {r['verdict']} by reward/risk)</div>")
         if sector_warning:
             html_parts.append(
                 f"<div style='font-size:12px;color:#b58900;margin:4px 0 12px 0;"
@@ -1701,6 +1717,19 @@ def main():
         print(f"  {'-'*68}")
         print(f"  (no changes, approaching thresholds, or developing trends)")
 
+    # ── SECTOR DRIFT WATCH — strict, descriptive early read on candidate-slate
+    #    sector concentration (rotation context to help pick candidates; NOT a
+    #    gate). Returns "" on a quiet day. Soft-fail: never break the alert. ──
+    try:
+        from lib.sector_drift import compute_sector_drift, render_text as _drift_text
+        _drift = _drift_text(compute_sector_drift(conn=conn))
+        if _drift.strip():
+            print()
+            for _l in _drift.split("\n"):
+                print(f"  {_l}")
+    except Exception as e:
+        print(f"\n  SECTOR DRIFT WATCH — unavailable ({e.__class__.__name__}: {e})")
+
     # Daily Macro Brief (reads Agent_Project ChromaDB — curve / FedWatch /
     # Fed RSS). Soft-fail: never break the alert pipeline if Agent_Project
     # is unavailable or its scrapers haven't run yet.
@@ -1907,7 +1936,8 @@ def main():
     has_events = any(tag in text_body for tag in ("⚠", "REGIME EVENT", "DTE CHECKPOINTS",
                                                    "ENTRY WINDOW", "ASSIGNMENT ZONE",
                                                    "EX-DIV ASSIGNMENT", "EARNINGS RISK",
-                                                   "OPEN POSITIONS", "CHANGING MARKET TRENDS"))
+                                                   "OPEN POSITIONS", "CHANGING MARKET TRENDS",
+                                                   "SECTOR DRIFT WATCH"))
     quiet = (not n_constructions) and (not has_events)
 
     # Compose subject + HTML always (used by both email + persistence).

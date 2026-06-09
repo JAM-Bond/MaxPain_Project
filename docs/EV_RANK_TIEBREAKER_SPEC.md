@@ -40,8 +40,14 @@ Every input is already produced by the live construction path
 
 **ZEBRA — `zebra_tier1`, `zebra_tier2`, `anti_zebra`** (delta-1 debit; reward uncapped):
 - defined risk = `debit`; no clean single-delta POP.
-- rank key = `notes["capital_efficiency"]` (stock-equivalent delta per dollar at risk),
-  with `extrinsic_cushion ≥ 0` as a hard pre-gate (already computed/displayed).
+- rank key = stock-equivalent exposure per dollar at risk = `net_delta · spot / debit`
+  (**HIGHER = better**), with `extrinsic_cushion ≥ 0` as a hard pre-gate.
+- ⚠ **DIRECTION WARNING** (verified 2026-06-06 via live preview): `structures.py` stores
+  `notes["capital_efficiency"] = debit/spot`, a COST ratio where **lower = better** — the
+  INVERSE of the rank key above. Do NOT sort the stored `capital_efficiency` descending; that
+  ranks the slate exactly backwards (e.g. it would put a 0.59-debit/spot name above a 0.31 one).
+  Rank by `net_delta·spot/debit` descending, or equivalently `debit/spot` ascending.
+  Reference impl: `scripts/research/zebra_ev_rank_preview.py`.
 
 **Inverted fly — `inverted_fly_*`** (long-vol debit):
 - `debit = −pos.entry_credit`; `max_profit_per_side = wing − debit`

@@ -38,6 +38,37 @@ def adequacy_flag(n: int) -> Literal["PRELIMINARY", "SUGGESTIVE", "DEVELOPING", 
     return "ADEQUATE"
 
 
+def ensure_sector_column(conn: sqlite3.Connection) -> None:
+    """Idempotently add the `sector` column to spread_score_trades."""
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(spread_score_trades)")]
+    if "sector" not in cols:
+        conn.execute("ALTER TABLE spread_score_trades ADD COLUMN sector TEXT")
+        conn.commit()
+
+
+def backfill_sectors(conn: sqlite3.Connection, force: bool = False) -> int:
+    """Populate spread_score_trades.sector from lib.sector_map.get_sector(symbol).
+
+    Idempotent. By default fills only NULL/empty sectors (never clobbers a manual
+    override); force=True re-derives every row (e.g. after a sector_map.py update).
+    Returns rows updated. Lets the placed book be sliced by GICS sector for
+    rotation / post-mortem, complementing the recommendation-slate drift watch.
+    """
+    from lib.sector_map import get_sector
+    ensure_sector_column(conn)
+    cond = "" if force else " AND (sector IS NULL OR sector='')"
+    where = "" if force else "WHERE sector IS NULL OR sector=''"
+    syms = [r[0] for r in conn.execute(
+        f"SELECT DISTINCT symbol FROM spread_score_trades {where}")]
+    n = 0
+    for sym in syms:
+        n += conn.execute(
+            f"UPDATE spread_score_trades SET sector=? WHERE symbol=?{cond}",
+            (get_sector(sym), sym)).rowcount
+    conn.commit()
+    return n
+
+
 def _load_trades(conn: sqlite3.Connection) -> pd.DataFrame:
     """Pull spread_score_trades + already-attached entry-context columns."""
     return pd.read_sql_query("""

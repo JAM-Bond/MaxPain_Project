@@ -138,6 +138,17 @@ def main() -> int:
 
     conn = connect()
     try:
+        # Keep the placed-book `sector` column fresh — new trades self-populate
+        # within a day (NULL-only fill; never clobbers a manual override). Soft-fail.
+        if not args.dry_run:
+            try:
+                from lib.trade_ledger import backfill_sectors
+                _n = backfill_sectors(conn)
+                if _n:
+                    print(f"  backfilled sector on {_n} trade row(s)")
+            except Exception as e:
+                print(f"  sector backfill skipped ({e.__class__.__name__}: {e})")
+
         trades = load_open_credit_verticals(conn, args.symbol)
         if trades.empty:
             print(f"No open credit-vertical trades to mark "

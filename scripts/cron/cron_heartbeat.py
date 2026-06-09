@@ -96,6 +96,7 @@ EXPECTED_DAILY = [
     ("close_prices",             "Close-price update",       16, 16),
     ("mark_open_spreads",        "Mark open spreads",        16, 20),
     ("reconcile_qualifier",      "Qualifier reconcile",      16, 25),
+    ("ev_enrich",                "EV-rank enrich",           16, 35),
     ("daily_alert",              "Daily alert email",        16, 45),
     ("orats_daily",              "ORATS daily pipeline",     19,  0),
     ("macro_refresh",            "Macro-sensitivity refresh",19, 30),
