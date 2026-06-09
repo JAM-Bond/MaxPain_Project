@@ -108,7 +108,11 @@ def parse_trade_transaction(txn: dict) -> Optional[dict]:
     fees = 0.0
     instrument_items = []
     for it in items:
-        if it.get("feeType") in _FEE_TYPES or ("feeType" in it and "instrument" not in it):
+        # Fees carry a feeType (on a CURRENCY_USD instrument — verified on the
+        # real HCA fill 2026-06-09: COMMISSION/SEC_FEE/OPT_REG_FEE/TAF_FEE).
+        # Detect by feeType presence, not a hardcoded list, so an unfamiliar fee
+        # label can't be misread as a position leg.
+        if it.get("feeType"):
             fees += abs(float(it.get("cost") or it.get("amount") or 0.0))
             continue
         if it.get("instrument"):

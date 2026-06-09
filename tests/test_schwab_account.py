@@ -41,8 +41,14 @@ OPT_BTO = {
                         "putCall": "PUT", "underlyingSymbol": "QQQ",
                         "expirationDate": "2027-03-19T20:00:00+0000", "strikePrice": 615.0},
          "amount": 2.0, "cost": -2468.0, "price": 12.34, "positionEffect": "OPENING"},
-        {"feeType": "COMMISSION", "cost": -0.65, "amount": 0.65},
-        {"feeType": "OPT_REG_FEE", "cost": 0.0, "amount": 0.0},
+        # real shape: fees ride on CURRENCY_USD instruments carrying a feeType
+        {"instrument": {"assetType": "CURRENCY", "symbol": "CURRENCY_USD"},
+         "feeType": "COMMISSION", "cost": -0.65, "amount": 0.65},
+        {"instrument": {"assetType": "CURRENCY", "symbol": "CURRENCY_USD"},
+         "feeType": "SEC_FEE", "cost": -0.05, "amount": 0.05},
+        # an unfamiliar fee label must still be counted (hardening)
+        {"instrument": {"assetType": "CURRENCY", "symbol": "CURRENCY_USD"},
+         "feeType": "MYSTERY_NEW_FEE", "cost": -0.10, "amount": 0.10},
     ],
 }
 # Synthetic option STC close WITHOUT explicit fields → OCC-symbol fallback.
@@ -88,9 +94,9 @@ def test_parse_option_explicit_fields():
     assert f["asset_type"] == "OPTION" and f["action"] == "BTO"
     assert f["underlying"] == "QQQ" and f["put_call"] == "PUT" and f["strike"] == 615.0
     assert f["expiry"] == "2027-03-19" and f["quantity"] == 2.0 and f["price"] == 12.34
-    assert f["fees"] == 0.65, f["fees"]                 # summed across fee items
-    assert f["n_instrument_legs"] == 1
-    print("  ✓ parse_trade_transaction: option BTO, explicit fields, fees summed")
+    assert f["fees"] == 0.80, f["fees"]                 # 0.65+0.05+0.10 incl. unknown label
+    assert f["n_instrument_legs"] == 1                  # CURRENCY fee items not counted as legs
+    print("  ✓ parse_trade_transaction: option BTO, real CURRENCY-fee shape, unknown fee counted")
 
 
 def test_parse_option_occ_fallback():
