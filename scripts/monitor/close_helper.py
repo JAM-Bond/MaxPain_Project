@@ -238,10 +238,19 @@ def build_close_block(db_path: Path = METAL_DB) -> dict:
 
     chain_cache: dict[tuple[str, str], tuple] = {}
     rows: list[CloseRow] = []
-    errors: list[str] = []
+    errors: list[str] = []      # genuine failures (chain fetch, empty chain, exception)
+    skipped: list[str] = []     # structures we knowingly don't price (not an error)
 
     for p in positions:
         sym, opex = p["symbol"], p["opex_date"]
+        st = p["spread_type"]
+        # Structures the close-pricer cannot represent from the 2-strike schema
+        # (e.g. iron_condor/iron_fly have 4 strikes) — skip cleanly, do NOT error.
+        if not (st.startswith("bull_put") or st.startswith("bear_call")
+                or st.startswith("zebra") or st == "long_put"
+                or st.startswith("inverted_fly")):
+            skipped.append(f"{sym} id={p['id']} {st}")
+            continue
         if (sym, opex) not in chain_cache:
             try:
                 chain_cache[(sym, opex)] = fetch_chain_with_greeks(sym, opex)
@@ -253,7 +262,6 @@ def build_close_block(db_path: Path = METAL_DB) -> dict:
             errors.append(f"{sym} {opex}: empty chain")
             continue
 
-        st = p["spread_type"]
         try:
             if st.startswith("bull_put") or st.startswith("bear_call"):
                 rows.append(_vertical_close(p, chain, spot))
@@ -262,18 +270,17 @@ def build_close_block(db_path: Path = METAL_DB) -> dict:
             elif st == "long_put":
                 rows.append(_long_put_close(p, chain, spot))
             elif st.startswith("inverted_fly"):
-                # 4-leg IF — defer for now; rare in current book
-                errors.append(f"{sym} id={p['id']}: inverted_fly close pricing not yet implemented")
-            else:
-                errors.append(f"{sym} id={p['id']}: unsupported spread_type {st}")
+                # 4-leg IF — close pricing not yet implemented; skip (not an error)
+                skipped.append(f"{sym} id={p['id']} {st} (4-leg pricing TODO)")
         except Exception as e:
             errors.append(f"{sym} id={p['id']}: {e}")
 
     # Sort by capture (credit spreads sort cleanly; debits use the same field)
     rows.sort(key=lambda r: r.capture_at_mid, reverse=True)
 
-    return {"ok": True, "text": _render_text(rows, errors),
-            "html": _render_html(rows, errors), "rows": rows, "errors": errors}
+    return {"ok": True, "text": _render_text(rows, errors, skipped),
+            "html": _render_html(rows, errors, skipped),
+            "rows": rows, "errors": errors, "skipped": skipped}
 
 
 def _capture_band(c: float) -> str:
@@ -427,8 +434,16 @@ def _t21_actions(rows: list[CloseRow]) -> list[tuple[CloseRow, int, str, str]]:
     return out
 
 
-def _render_text(rows: list[CloseRow], errors: list[str]) -> str:
-    if not rows:
+def _entry_tag(ec: float) -> str:
+    """Entry shown as an absolute price with a side tag — no naked negatives.
+    cr = credit taken in (close = buy back / pay); db = debit paid (close = sell out)."""
+    return f"{ec:.2f}cr" if ec >= 0 else f"{abs(ec):.2f}db"
+
+
+def _render_text(rows: list[CloseRow], errors: list[str],
+                 skipped: list[str] | None = None) -> str:
+    skipped = skipped or []
+    if not rows and not skipped and not errors:
         return "No closeable positions."
     lines = []
 
@@ -444,24 +459,34 @@ def _render_text(rows: list[CloseRow], errors: list[str]) -> str:
             )
         lines.append("")
 
-    lines.append("OPEN POSITIONS — close-side mark (sorted by capture %)")
-    lines.append("")
-    lines.append(f"  {'id':>4} {'sym':<6} {'OpEx':<10} {'structure':<14} "
-                 f"{'strikes':>11} {'qty':>3}  "
-                 f"{'entry':>6} {'mid':>6} {'natur':>6} {'limit':>6}  "
-                 f"{'$@mid':>7} {'$@nat':>7} {'$@lim':>7}  {'cap':>5}  liq")
-    lines.append("  " + "─" * 132)
-    for r in rows:
-        strikes = f"{r.short_strike:g}/{r.long_strike:g}"
-        liq = f"⚠ {r.wide_warning}" if r.wide_warning else ""
-        lines.append(
-            f"  {_capture_band(r.capture_at_mid)} {r.id:>2} {r.symbol:<6} "
-            f"{r.opex_date:<10} {r.spread_type:<14} "
-            f"{strikes:>11} {r.shares:>3}  "
-            f"${r.entry_credit:>5.2f} ${r.mid_close:>5.2f} ${r.natural_close:>5.2f} ${r.limit_close:>5.2f}  "
-            f"${r.pnl_at_mid:>+6.0f} ${r.pnl_at_natural:>+6.0f} ${r.pnl_at_limit:>+6.0f}  "
-            f"{r.capture_at_mid*100:>+4.0f}%  {liq}"
-        )
+    if rows:
+        lines.append("OPEN POSITIONS — close-side mark (sorted by capture %)")
+        lines.append("  Act on LIMIT (your recommended GTC). entry: cr=credit taken in / db=debit paid.")
+        lines.append("  P/L and cap are at the limit; 'fill mid→worst' is the price range you'll fill between.")
+        lines.append("")
+        lines.append(f"  {'':2}{'id':>4} {'sym':<6} {'structure':<14} {'strikes':>9} "
+                     f"{'qty':>3} {'entry':>7} {'DTE':>4}  {'LIMIT':>7} {'P/L@lim':>8} "
+                     f"{'cap':>5}  {'fill mid→worst':>15}  liq")
+        lines.append("  " + "─" * 108)
+        for r in rows:
+            strikes = f"{r.short_strike:g}/{r.long_strike:g}"
+            liq = f"⚠ {r.wide_warning}" if r.wide_warning else ""
+            dte = _dte_for(r.opex_date)
+            dte_str = f"D{dte}" if dte is not None else "D?"
+            fill = f"{r.mid_close:.2f}→{r.natural_close:.2f}"
+            lines.append(
+                f"  {_capture_band(r.capture_at_mid)} {r.id:>4} {r.symbol:<6} "
+                f"{r.spread_type:<14} {strikes:>9} {r.shares:>3} "
+                f"{_entry_tag(r.entry_credit):>7} {dte_str:>4}  "
+                f"${r.limit_close:>6.2f} ${r.pnl_at_limit:>+7.0f} "
+                f"{r.capture_at_mid*100:>+4.0f}%  {fill:>15}  {liq}"
+            )
+
+    if skipped:
+        lines.append("")
+        lines.append("Not priced (structure not supported by the close-pricer):")
+        for s in skipped:
+            lines.append(f"  · {s}")
     if errors:
         lines.append("")
         lines.append("Errors:")
@@ -470,8 +495,10 @@ def _render_text(rows: list[CloseRow], errors: list[str]) -> str:
     return "\n".join(lines)
 
 
-def _render_html(rows: list[CloseRow], errors: list[str]) -> str:
-    if not rows:
+def _render_html(rows: list[CloseRow], errors: list[str],
+                 skipped: list[str] | None = None) -> str:
+    skipped = skipped or []
+    if not rows and not skipped:
         return "<p>No closeable positions.</p>"
 
     t21_html = ""
@@ -502,10 +529,10 @@ def _render_html(rows: list[CloseRow], errors: list[str]) -> str:
         )
 
     head = ("<tr style='background:#eee'>"
-            "<th>id</th><th>sym</th><th>OpEx</th><th>structure</th>"
-            "<th>strikes</th><th>qty</th>"
-            "<th>entry</th><th>mid_cls</th><th>natural</th><th>limit</th>"
-            "<th>$@mid</th><th>$@nat</th><th>$@lim</th><th>cap%</th><th>liq</th></tr>")
+            "<th>cap</th><th>id</th><th>sym</th><th>structure</th>"
+            "<th>strikes</th><th>qty</th><th>entry</th><th>DTE</th>"
+            "<th>LIMIT</th><th>P/L@lim</th><th>cap%</th>"
+            "<th>fill mid→worst</th><th>liq</th></tr>")
     body = []
     for r in rows:
         cap_color = ("#0a0" if r.capture_at_mid >= 0.50 else
@@ -513,38 +540,50 @@ def _render_html(rows: list[CloseRow], errors: list[str]) -> str:
                      "#666" if r.capture_at_mid >= 0.0 else "#a00")
         liq = (f"<span style='color:#a00;font-weight:bold'>⚠ {r.wide_warning}</span>"
                if r.wide_warning else "")
+        dte = _dte_for(r.opex_date)
+        dte_str = f"{dte}" if dte is not None else "?"
         body.append(
             f"<tr>"
+            f"<td align=center>{_capture_band(r.capture_at_mid)}</td>"
             f"<td align=right>{r.id}</td>"
             f"<td><b>{r.symbol}</b></td>"
-            f"<td>{r.opex_date}</td>"
             f"<td>{r.spread_type}</td>"
             f"<td align=right>{r.short_strike:g}/{r.long_strike:g}</td>"
             f"<td align=center>{r.shares}</td>"
-            f"<td align=right>${r.entry_credit:.2f}</td>"
-            f"<td align=right>${r.mid_close:.2f}</td>"
-            f"<td align=right style='color:#888'>${r.natural_close:.2f}</td>"
+            f"<td align=right>{_entry_tag(r.entry_credit)}</td>"
+            f"<td align=center>{dte_str}</td>"
             f"<td align=right><b>${r.limit_close:.2f}</b></td>"
-            f"<td align=right>${r.pnl_at_mid:+.0f}</td>"
-            f"<td align=right style='color:#888'>${r.pnl_at_natural:+.0f}</td>"
-            f"<td align=right>${r.pnl_at_limit:+.0f}</td>"
+            f"<td align=right style='font-weight:bold'>${r.pnl_at_limit:+.0f}</td>"
             f"<td align=right style='color:{cap_color};font-weight:bold'>"
             f"{r.capture_at_mid*100:+.0f}%</td>"
+            f"<td align=right style='color:#888'>"
+            f"${r.mid_close:.2f}→${r.natural_close:.2f}</td>"
             f"<td>{liq}</td>"
             f"</tr>"
         )
+    skip_html = ""
+    if skipped:
+        skip_html = ("<div style='font-size:11px;color:#888;margin-top:4px'>"
+                     "Not priced (unsupported structure): " + "; ".join(skipped) + "</div>")
     err_html = ""
     if errors:
-        err_html = ("<div style='font-size:11px;color:#888;margin-top:4px'>"
+        err_html = ("<div style='font-size:11px;color:#a00;margin-top:4px'>"
                     "Errors: " + "; ".join(errors) + "</div>")
+    table_html = ""
+    if rows:
+        table_html = (
+            "<div style='font-weight:bold;margin-bottom:2px'>"
+            "OPEN POSITIONS — close-side mark (sorted by capture %)</div>"
+            "<div style='color:#666;font-size:11px;margin-bottom:4px'>"
+            "Act on LIMIT (recommended GTC). entry: cr=credit in / db=debit paid. "
+            "P/L &amp; cap at the limit; 'fill mid→worst' = the price range you'll fill between.</div>"
+            "<table style='border-collapse:collapse;font-size:12px'>"
+            f"<thead>{head}</thead><tbody>{''.join(body)}</tbody></table>"
+        )
     return (
         f"{t21_html}"
         "<div style='font-family:Menlo,Consolas,monospace;font-size:12px'>"
-        "<div style='font-weight:bold;margin-bottom:4px'>"
-        "OPEN POSITIONS — close-side mark (sorted by capture %)</div>"
-        "<table style='border-collapse:collapse;font-size:12px'>"
-        f"<thead>{head}</thead><tbody>{''.join(body)}</tbody></table>"
-        f"{err_html}</div>"
+        f"{table_html}{skip_html}{err_html}</div>"
     )
 
 

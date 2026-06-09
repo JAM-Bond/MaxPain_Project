@@ -608,7 +608,10 @@ def detect_dte_checkpoints(positions: pd.DataFrame, conn) -> list[str]:
         sk = p.get("short_strike")
         sk_str = f"{sk:g}" if sk is not None and not pd.isna(sk) else "?"
 
-        is_credit_vertical = struct in ("bull_put", "bull_put_mp", "bear_call", "iron_condor", "iron_fly")
+        # iron_condor / iron_fly are NOT priced/marked by this system (rejected
+        # structures; the mark daemon only marks 2-leg verticals). Excluding them
+        # here avoids a false "no marks found — mark daemon disabled?" alert.
+        is_credit_vertical = struct in ("bull_put", "bull_put_mp", "bear_call")
 
         # ── Profit-target alerts (DTE-independent, credit verticals only) ──
         profit_alerted = False
@@ -1815,18 +1818,18 @@ def main():
         for ev in actionable_earnings:
             print(f"  {ev}")
 
-    # 52w-extreme tagging on open positions (regime context, not actionable)
-    extreme_events = detect_52w_extreme_positions(positions)
-    if extreme_events:
-        print(f"\n  52-WEEK EXTREME CONTEXT (open positions at 52w highs/lows)")
-        print(f"  {'-'*68}")
-        for ev in extreme_events:
-            print(f"  {ev}")
+    # 52w-extreme tagging on open positions: REMOVED 2026-06-09. It duplicated the
+    # per-position spot-vs-200-DMA read already in POSITION HEALTH, and 52w-extremes
+    # is a rejected selection signal (project_52w_extremes_rejected) — surfacing it as
+    # position "context" added a redundant pass without adding decision value.
+    extreme_events: list[str] = []
 
-    # IF cohort screening — names currently at 52w lows (long-vol setup confirmation)
+    # IF cohort screening — cohort names currently at 52w lows. Context only:
+    # 52w-low is NOT a validated IF entry signal (IF entry is gated by term-inversion,
+    # not 52w extremes). Kept as a watchlist, relabeled to not imply "confirmation".
     if_candidates = detect_if_candidates_at_52w_lows()
     if if_candidates:
-        print(f"\n  IF COHORT AT 52W LOWS (long-vol setup confirmation, not yet held)")
+        print(f"\n  IF COHORT — names near 52w lows (context only; not an entry signal)")
         print(f"  {'-'*68}")
         for c in if_candidates:
             print(f"  {c}")
@@ -1868,24 +1871,27 @@ def main():
         from scripts.monitor.close_helper import (
             build_close_block, build_close_candidates_rollup,
         )
-        close_block = build_close_block()
+        # Build inside redirect_stdout(_real_stdout): the Schwab auth layer prints
+        # "Refreshing access token… ✓ Token saved…" on first call, which the _Tee
+        # would otherwise splice into the alert body. Send that chatter to the cron
+        # log only; the intended output is the returned text, printed (tee'd) below.
+        with redirect_stdout(_real_stdout):
+            close_block = build_close_block()
+            cand = build_close_candidates_rollup(
+                close_block.get("rows", []), conn, date.today().isoformat()
+            )
         close_text = close_block.get("text", "")
-        close_errors = close_block.get("errors", [])
-        # CLOSE CANDIDATES TODAY rollup — synthesizes 50%-profit, T-21, and
-        # regime-🔴 cues into one action summary, printed BEFORE the detail
-        # table so the user sees actionable items first.
-        cand = build_close_candidates_rollup(
-            close_block.get("rows", []), conn, date.today().isoformat()
-        )
         close_stress_symbols = cand.get("stress_symbols", [])
+        # CLOSE CANDIDATES TODAY rollup — actionable summary first.
         if cand.get("text"):
             print()
             print(cand["text"])
+        # close_text already contains its own Errors:/Not-priced footer (from
+        # close_helper._render_text) — do NOT re-print close_block["errors"] here
+        # or every error shows twice.
         if close_text and close_text != "No open placed positions.":
             print()
             print(close_text)
-            for err in close_errors[:5]:
-                print(f"  ⚠ {err}")
     except Exception as e:
         print(f"  ⚠ close_helper enrichment failed: {e}")
 
@@ -1902,8 +1908,9 @@ def main():
 
     # All-quiet footer (computed before construction enrichment because we
     # consider construction availability as "not quiet" too).
-    construction_text, construction_html = build_construction_enrichment(
-        conn, close_candidate_symbols=close_stress_symbols)
+    with redirect_stdout(_real_stdout):   # keep Schwab/token chatter out of the body
+        construction_text, construction_html = build_construction_enrichment(
+            conn, close_candidate_symbols=close_stress_symbols)
 
     if (not regime_events and not approach_events and not trajectory_events
             and not pos_events
