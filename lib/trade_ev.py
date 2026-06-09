@@ -244,6 +244,61 @@ def rank_candidates(rows: list[dict]) -> list[dict]:
     return scored
 
 
+# ─── Cross-structure tiebreak for the concentration caps (spec step C) ────────
+
+def annotate_bucket_ev(bucket: list[dict], cache: Optional[dict] = None) -> dict:
+    """Score one OVER-cap bucket of candidate rows and attach a cross-structure-
+    comparable ordinal tiebreak score. Mutates each row in place:
+
+        row["_ev"]      -> EVScore (always set)
+        row["_ev_epr"]  -> raw ev_per_risk if the row passes hard gates, else None
+        row["_ev_norm"] -> within-(structure-kind) median-rank percentile in (0,1),
+                           higher = better, or None if the row failed hard gates /
+                           errored (→ caller sorts it last, i.e. alphabetical).
+
+    Why a within-kind percentile and not raw ev_per_risk: ev_per_risk is only
+    comparable WITHIN a structure kind (a vertical's EV/max_loss ≈ 0.x vs a zebra's
+    Δ·spot/debit ≈ 4). A sector/regime bucket can mix kinds (e.g. MSFT bull_put +
+    NVDA zebra), so sorting by raw ev_per_risk would rank zebras first purely as a
+    units artifact. The median-rank percentile (i+0.5)/n is comparable across kinds
+    and, for a single-kind bucket (the common case), is monotonic in ev_per_risk —
+    so it reduces exactly to the spec's `−ev_per_risk`. A lone member of a kind
+    lands at the neutral 0.5 rather than dominating.
+
+    Fail-open: a candidate whose chain/construction fails (thin 9:25 chains,
+    Schwab outage) gets _ev_norm=None and sorts last. Returns a small coverage
+    dict {"n": total, "scored": usable, "failed": fail-open count} for logging.
+    """
+    from collections import defaultdict
+
+    n_usable = 0
+    for r in bucket:
+        try:
+            ev = score_candidate(r["symbol"], r["structure"],
+                                 r.get("expiry") or r.get("opex"), cache=cache)
+        except Exception as e:  # belt-and-suspenders; score_candidate already fails open
+            ev = EVScore(symbol=r["symbol"], structure=r["structure"],
+                         error=f"{e.__class__.__name__}: {e}")
+        usable = (ev.error is None) and ev.passes_hard_gates and (ev.ev_per_risk is not None)
+        r["_ev"] = ev
+        r["_ev_epr"] = ev.ev_per_risk if usable else None
+        r["_ev_norm"] = None
+        n_usable += usable
+
+    # within-kind median-rank percentile over the usable rows only
+    by_kind: dict = defaultdict(list)
+    for r in bucket:
+        if r["_ev_epr"] is not None:
+            by_kind[kind_of(r["structure"])].append(r)
+    for members in by_kind.values():
+        members.sort(key=lambda r: r["_ev_epr"])   # ascending: worst first
+        n = len(members)
+        for i, r in enumerate(members):             # i=0 worst → lowest percentile
+            r["_ev_norm"] = (i + 0.5) / n
+
+    return {"n": len(bucket), "scored": n_usable, "failed": len(bucket) - n_usable}
+
+
 # ─── Demo CLI: rank today's committed slate across all structures ─────────────
 def _demo():
     import sqlite3

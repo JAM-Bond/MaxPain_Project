@@ -744,7 +744,58 @@ def format_verdicts(verdict_rows: list[dict]) -> str:
 
 # ─── Sector-concentration cap ─────────────────────────────────────────
 
-def apply_sector_concentration_cap(rows: list[dict]) -> list[dict]:
+def _ev_rank_bucket(bucket: list[dict], verdict_rank: dict,
+                    cache: dict | None) -> tuple[list[dict], dict | None]:
+    """Rank an OVER-cap bucket by (verdict tier, EV reward/risk, alphabetical).
+
+    Replaces the old alphabetical-only tiebreak (spec step C). The EV score is a
+    cross-structure-comparable within-kind percentile (see lib.trade_ev.
+    annotate_bucket_ev) so a zebra's larger raw ev_per_risk can't outrank a vertical
+    purely on units. GO still beats DOWNSIZE first; alphabetical is the final
+    deterministic tiebreak.
+
+    Fail-open to the prior alphabetical order if the EV scorer can't be imported,
+    the whole bucket raises, or every candidate fails to score (thin 9:25 chains /
+    Schwab outage) — the qualifier never fails closed on a pricing problem. Returns
+    (ranked_rows, coverage_dict_or_None).
+    """
+    alpha_key = lambda r: (verdict_rank.get(r["verdict"], 99), r["symbol"])
+    try:
+        from lib.trade_ev import annotate_bucket_ev
+    except Exception as e:  # heavy import (schwab/construction) — degrade gracefully
+        log.warning("EV scorer unavailable; cap tiebreak → alphabetical: %s", e)
+        return sorted(bucket, key=alpha_key), None
+    try:
+        cov = annotate_bucket_ev(bucket, cache=cache)
+    except Exception as e:
+        log.warning("EV scoring raised for bucket; cap tiebreak → alphabetical: %s", e)
+        return sorted(bucket, key=alpha_key), None
+    if not cov.get("scored"):
+        # nobody scored (all chains thin/failed) → identical to old behavior
+        return sorted(bucket, key=alpha_key), cov
+    ranked = sorted(
+        bucket,
+        key=lambda r: (
+            verdict_rank.get(r["verdict"], 99),
+            0 if r.get("_ev_norm") is not None else 1,   # usable EV before unknown
+            -(r.get("_ev_norm") or 0.0),                 # best reward/risk kept
+            r["symbol"],                                  # final deterministic tiebreak
+        ),
+    )
+    return ranked, cov
+
+
+def _ev_note(r: dict) -> str:
+    """Short audit suffix recording the EV/risk used for the tiebreak (or fallback)."""
+    epr = r.get("_ev_epr")
+    if epr is not None:
+        return f"EV/risk={epr:+.3f}"
+    ev = r.get("_ev")
+    why = (getattr(ev, "gate_note", "") or getattr(ev, "error", "")) if ev else ""
+    return f"EV n/a ({why})" if why else "EV n/a"
+
+
+def apply_sector_concentration_cap(rows: list[dict], ev_cache: dict | None = None) -> list[dict]:
     """Enforce max-N-single-names-per-GICS-sector-per-OpEx on GO/DOWNSIZE rows.
 
     Triggered by the WFC + JPM same-cycle stop pattern on 2026-05-12.
@@ -753,7 +804,9 @@ def apply_sector_concentration_cap(rows: list[dict]) -> list[dict]:
 
     Ranking within an over-concentrated sector:
       1. Verdict tier: GO ranks above DOWNSIZE (qualifier-decided confidence)
-      2. Alphabetical tiebreaker (deterministic, no judgment)
+      2. EV reward/risk (best kept) — cross-structure-comparable within-kind
+         percentile from lib.trade_ev (spec step C); fails open to alphabetical
+      3. Alphabetical (deterministic final tiebreak)
 
     Lower-ranked candidates get verdict downgraded to SKIP_CONCENTRATION with
     sector_rank_position annotation (e.g. "3 of 4 in financials"). All rows
@@ -788,15 +841,17 @@ def apply_sector_concentration_cap(rows: list[dict]) -> list[dict]:
         key = (opex, r["sector"])
         groups.setdefault(key, []).append(r)
 
+    if ev_cache is None:
+        ev_cache = {}
     n_capped = 0
     for (opex, sector), bucket in groups.items():
         if len(bucket) <= G.SECTOR_CAP_MAX_PER_OPEX:
             continue
-        # Rank: GO before DOWNSIZE; then alphabetical
-        ranked = sorted(
-            bucket,
-            key=lambda r: (verdict_rank.get(r["verdict"], 99), r["symbol"]),
-        )
+        # Rank: GO before DOWNSIZE; then best EV reward/risk; alphabetical last.
+        ranked, cov = _ev_rank_bucket(bucket, verdict_rank, ev_cache)
+        if cov:
+            log.info("Sector cap EV-tiebreak (%s/%s): %d/%d candidates scored",
+                     sector, opex, cov["scored"], cov["n"])
         total = len(ranked)
         for idx, r in enumerate(ranked, start=1):
             r["sector_rank_position"] = f"{idx} of {total} in {sector}"
@@ -805,7 +860,7 @@ def apply_sector_concentration_cap(rows: list[dict]) -> list[dict]:
                 r["verdict"] = G.VERDICT_SKIP_CONCENTRATION
                 r["size"] = 0.0
                 cap_note = (
-                    f"sector cap fired ({sector}, {idx}/{total} rank); "
+                    f"sector cap fired ({sector}, {idx}/{total} rank, {_ev_note(r)}); "
                     f"original verdict={original_verdict}"
                 )
                 r["reason"] = (
@@ -822,7 +877,7 @@ def apply_sector_concentration_cap(rows: list[dict]) -> list[dict]:
 
 # ─── Macro-concentration cap ──────────────────────────────────────────
 
-def apply_macro_concentration_cap(rows: list[dict]) -> list[dict]:
+def apply_macro_concentration_cap(rows: list[dict], ev_cache: dict | None = None) -> list[dict]:
     """Soft-downsize names that over-concentrate a single macro regime bucket.
 
     Orthogonal to the GICS sector cap: two names in different sectors can be
@@ -834,7 +889,9 @@ def apply_macro_concentration_cap(rows: list[dict]) -> list[dict]:
     keep their verdict; the rest are DOWNSIZED (GO → DOWNSIZE at G.SIZE_DOWNSIZE;
     already-DOWNSIZE rows keep their size and are annotated). Nothing is skipped
     — macro is a risk descriptor, not a selection edge, and the buckets are
-    coarse. Ranking: verdict tier (GO > DOWNSIZE) then alphabetical.
+    coarse. Ranking: verdict tier (GO > DOWNSIZE), then EV reward/risk (best kept,
+    cross-structure-comparable within-kind percentile; spec step C; fails open to
+    alphabetical), then alphabetical.
 
     NEUTRAL / NA buckets are never capped (not a concentrated bet). Earnings-
     anchored rows are excluded (different time bucket). Runs AFTER the sector
@@ -898,21 +955,23 @@ def apply_macro_concentration_cap(rows: list[dict]) -> list[dict]:
             continue
         groups.setdefault((opex, rp), []).append(r)
 
+    if ev_cache is None:
+        ev_cache = {}
     n_capped = 0
     for (opex, rp), bucket in groups.items():
         if len(bucket) <= G.MACRO_CAP_MAX_PER_OPEX:
             continue
-        ranked = sorted(
-            bucket,
-            key=lambda r: (verdict_rank.get(r["verdict"], 99), r["symbol"]),
-        )
+        ranked, cov = _ev_rank_bucket(bucket, verdict_rank, ev_cache)
+        if cov:
+            log.info("Macro cap EV-tiebreak (%s/%s): %d/%d candidates scored",
+                     rp, opex, cov["scored"], cov["n"])
         total = len(ranked)
         for idx, r in enumerate(ranked, start=1):
             r["macro_rank_position"] = f"{idx} of {total} in {rp}"
             if idx <= G.MACRO_CAP_MAX_PER_OPEX:
                 continue
             cap_note = (
-                f"macro cap fired ({rp}, {idx}/{total} rank); "
+                f"macro cap fired ({rp}, {idx}/{total} rank, {_ev_note(r)}); "
                 f"downsized for regime-bucket concentration"
             )
             if r["verdict"] == G.VERDICT_GO:
@@ -1052,14 +1111,18 @@ def main():
     earnings_rows = build_earnings_verdicts(run_date, spots)
     verdict_rows = opex_rows + earnings_rows
 
+    # Shared per-run chain cache for the EV-rank tiebreak inside both caps, so a
+    # chain fetched for an over-cap sector bucket is reused by the macro cap.
+    ev_cache: dict = {}
+
     # Sector-concentration cap (max 2 single names per GICS sector per OpEx).
     # Runs after all per-structure verdicts so it sees the full candidate set.
-    verdict_rows = apply_sector_concentration_cap(verdict_rows)
+    verdict_rows = apply_sector_concentration_cap(verdict_rows, ev_cache=ev_cache)
 
     # Macro-concentration cap (soft-downsize beyond G.MACRO_CAP_MAX_PER_OPEX
     # names per regime_primary bucket per OpEx). Orthogonal to the sector cap;
     # runs after it so it only re-sizes still-actionable rows.
-    verdict_rows = apply_macro_concentration_cap(verdict_rows)
+    verdict_rows = apply_macro_concentration_cap(verdict_rows, ev_cache=ev_cache)
 
     print()
     print("=" * 78)
