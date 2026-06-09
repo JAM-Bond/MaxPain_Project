@@ -75,9 +75,9 @@ with g3:
 with g4:
     st.markdown(
         f"<div style='font-family:IBM Plex Mono,monospace;font-size:13px;color:#e6edf3'>"
-        f"<b>MAX_SPOT_ZEBRA</b><br>"
-        f"<span style='color:#79c0ff'>${G['MAX_SPOT_ZEBRA']:.0f}</span> "
-        f"<span style='color:#8b949e'>· ZEBRA cap on underlying price</span></div>",
+        f"<b>ZEBRA spot cap</b><br>"
+        f"<span style='color:#79c0ff'>none</span> "
+        f"<span style='color:#8b949e'>· dropped 2026-06-09; overlay-protected, discretion-sized</span></div>",
         unsafe_allow_html=True,
     )
 
@@ -160,7 +160,7 @@ with tabs[2]:
 with tabs[3]:
     st.markdown(
         f"<div style='color:#c9d1d9;font-size:12px;margin-bottom:6px'>"
-        f"75-DTE · spot cap ${G['MAX_SPOT_ZEBRA']:.0f} · "
+        f"75-DTE · no spot cap (overlay-protected, discretion-sized) · "
         f"trend gate: spot &gt; 200-DMA (252-day lookback)"
         f"</div>",
         unsafe_allow_html=True,

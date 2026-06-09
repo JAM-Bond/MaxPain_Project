@@ -226,6 +226,9 @@ PAPER_SIZED_STRUCTURES = {"bull_put_mp"}  # remove after paper window closes
 # Threshold is a parameter, not a constant of nature: bump if book equity
 # grows.
 
+# NOT ENFORCED as of 2026-06-09 — retained for reference/dashboard display only.
+# The qualifier no longer caps ZEBRA on spot (see BUDGET_CAPS note below). Kept
+# as the historical guardrail value; the overlay now governs ZEBRA tail risk.
 MAX_SPOT_ZEBRA = 100.0
 # Inverted_fly cap raised 2026-05-06 from $100 to $300. Original $100 was
 # anchored on a $620 NOC IF example; the policy intent ("avoid NOC-sized MTM
@@ -280,9 +283,15 @@ IVR_NEAR_BAND = 0.10              # IVR within 0.10 of 0.50 = 🟡
 SPOT_MA200_NEAR_PCT = 0.03        # per-position: spot within 3% of 200-DMA = 🟡
 TREND_VELOCITY_LOOKBACK_DAYS = 5  # 5d Δ for velocity readout
 
+# ZEBRA spot cap DROPPED 2026-06-09 (user decision). The $100 cap was a
+# tail-risk proxy; the long-put overlay (validated Phase 1, wired live via
+# zebra_overlay_rule.py) caps the ZEBRA tail directly, so ZEBRA is now admitted
+# regardless of spot and capital-outlay sizing is trader discretion at
+# construction. This implements decision #2 of project_zebra_put_overlay_phase1_findings
+# (and supersedes its decision #4 "bare ZEBRA ≥$100 disallowed" — the user opted
+# for full discretion). zebra_tier1/zebra_tier2 intentionally absent below.
+# IF caps remain (no overlay protection there).
 BUDGET_CAPS = {
-    "zebra_tier1": MAX_SPOT_ZEBRA,
-    "zebra_tier2": MAX_SPOT_ZEBRA,
     "inverted_fly_pair": MAX_SPOT_INVERTED_FLY,
     "inverted_fly_single": MAX_SPOT_INVERTED_FLY,
     "inverted_fly_earnings": MAX_SPOT_INVERTED_FLY,
