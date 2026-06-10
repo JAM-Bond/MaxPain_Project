@@ -1,8 +1,38 @@
 # MaxPain Project — A High-Level Overview
 
-*A personal options-trading research and execution system*
+*A personal options-trading research and decision-support system*
 
 ---
+
+## How to read this document
+
+This overview is written in two parts.
+
+**Part I — How the System Works** (sections 1–6) is an explanatory text. It describes
+what the system is for, how it chooses what to trade, and the reasoning behind each
+layer of the design. It assumes no prior familiarity with the project and can be read
+on its own as a description of the approach.
+
+**Part II — Operating the System** (sections 7–13) is a user's guide. It describes the
+daily rhythm of running the system, how to read what it produces, how to use the
+dashboard, what a single trading cycle looks like from start to finish, and the routine
+maintenance the system needs to keep running.
+
+A single rule frames everything that follows, and it is worth stating before anything
+else: **the system never places a trade.** It is advisory. It studies, it recommends,
+and it scores discipline after the fact — but every order is entered by hand, by the
+trader, on the trader's own judgment. Nothing in the software can buy or sell. Section 7
+returns to this in detail; it is mentioned here so that nothing in Part I is misread as
+an automated trading engine.
+
+The precise, version-controlled mechanics — exact deltas, cohort membership, signal
+formulas, and the revision log — live in the formal trading plan (`TRADING_PLAN.rtf`).
+This document is the higher-level narrative and the how-to-operate layer; where the two
+ever disagree, the trading plan is canonical.
+
+---
+
+# Part I — How the System Works
 
 ## 1. Purpose
 
@@ -122,4 +152,279 @@ The profile, like every research layer in the system, is explicitly not a market
 
 ---
 
-*Roughly 2,900 words across approximately four pages at standard formatting.*
+# Part II — Operating the System
+
+## 7. The Advisory Principle
+
+The single most important fact about how this system is operated is that it never trades.
+There is no order-placement code anywhere in the project. The system cannot buy, sell,
+modify, or cancel a position by any means — not through the brokerage interface, not
+through a script, not on a schedule, not as a "test." Its connection to the brokerage is
+strictly read-only: it reads account balances, positions, and filled orders so that it
+can keep its records honest, and that is the full extent of its reach into the account.
+
+Every trade is placed by hand. The system's job is to do the homework — to say, on a
+given afternoon, "these are the names that qualify, here is the structure and size the
+rules call for, and here is where each open position stands against its exit lines." The
+trader reads that, forms a judgment, and enters the orders manually at the brokerage.
+The system is the analyst and the record-keeper; the trader is the only one with a
+finger on the trigger.
+
+This is a deliberate design choice, not a missing feature. A solo trader without an
+institutional risk desk benefits from a mechanical layer that holds the doctrine
+steadily — but the moment a system can act on its own conclusions, a software bug
+becomes a financial loss rather than a bad recommendation that a human can decline. By
+keeping the act of trading entirely in human hands, every recommendation passes through
+a final layer of judgment, and no defect in the code can ever move money. "Going live,"
+in this project's language, does not mean switching on an automated trader. It means the
+trader decides to start acting on the recommendations with real capital instead of on
+paper.
+
+---
+
+## 8. The Daily Operating Rhythm
+
+The system runs on a fixed weekday schedule of scheduled jobs. The trader does not start
+these by hand; they fire on their own, Monday through Friday, and deposit their results
+where the trader can read them. The day has two pulses — a morning pulse that decides
+what is eligible to trade, and an afternoon pulse that reports on the open book and
+produces the day's action summary. Times below are U.S. Eastern.
+
+**Early morning — health and housekeeping.** Before the market opens, the system checks
+its own vital signs. A heartbeat monitor confirms that every scheduled job ran the day
+before and raises an alarm for any that silently failed to appear. Two brokerage-auth
+health checks verify that the read-only connection to the brokerage is alive and warn,
+with two days of lead time, when the weekly re-authorization is about to be required
+(see section 12). A database backup is taken and integrity-checked.
+
+**Mid-morning — the qualifier decides eligibility.** Around the market open the system
+takes a fresh snapshot of the research cohort and refreshes the earnings calendar, then
+runs the **cycle qualifier**. The qualifier is the morning's centerpiece: for every name
+in every cohort it produces one of four verdicts — a full-size *go*, a half-size
+*downsize*, a *skip*, or a *pending* verdict awaiting more data — by running the gates
+described in section 3. Immediately afterward an AI commentary pass writes a short
+plain-language read of the pre-cycle setup. By mid-morning, the trader can see exactly
+which names are eligible for the day and at what size.
+
+**Late afternoon — marking the book and building the alert.** After the close the system
+pulls the day's closing prices, marks every open spread to its current value, ingests any
+filled orders from the brokerage, reconciles the qualifier's earlier verdicts against
+what actually happened, scores the expected-value ranking used to break ties among
+qualified candidates, and freezes the entry-context snapshot for any newly placed trade.
+All of this feeds the **daily alert**, which is generated at 4:45 PM and is the single
+most important thing the trader reads each day (section 9).
+
+**Evening — refreshing the research substrate.** In the evening the system ingests the
+day's full options-chain history from the data vendor, refreshes the macro-sensitivity
+profile against the new data, and runs the overnight auto-promotion scan that watches for
+names earning their way toward cohort membership. This is the layer that keeps the
+research current; the trader rarely needs to look at it directly, but it is why the next
+morning's qualifier is working from fresh evidence.
+
+**Quarterly.** Four times a year the full cohort-selection pipeline re-runs against newly
+available cycles, so that cohort membership and per-ticker recommendations stay current
+with the most recent year of market history rather than ossifying at their original
+values.
+
+The practical takeaway for the trader is simple: **check the qualifier mid-morning to see
+what is eligible, and read the daily alert after the close to decide what to do.**
+Everything else runs underneath.
+
+---
+
+## 9. Reading the Daily Alert
+
+The daily alert is an email the system sends every weekday afternoon. It is the
+operating summary of the entire book and the primary surface the trader acts on. It is
+organized so that the most time-sensitive information — what to consider closing — comes
+first, and the context that informs those decisions follows.
+
+**Regime header.** The alert opens with a plain-language statement of the current market
+regime: where the broad market sits relative to its long-term trend, what the volatility
+environment looks like, and which of the early-warning rings (section 3) are flashing. A
+*trajectory watch* line flags conditions that are trending toward a threshold but have
+not yet crossed it, so that a deteriorating backdrop is visible before it becomes a
+problem.
+
+**Close-side actions.** Next comes the list of open positions that warrant attention:
+positions at or near their fifty-percent profit target, positions reaching the
+twenty-one-day management cue, and positions whose underlying has moved toward or through
+a short strike. Each carries a concrete reason — how much cushion remains to the short
+strike, whether a strike has been breached, and the regime context — and, where relevant,
+a suggested limit price and the worst-case fill range, so the trader can place a close
+order by hand with the numbers already worked out.
+
+**Construction blocks.** For names that cleared the qualifier as eligible, the alert
+provides a construction block: the specific structure, the strikes implied by the
+per-ticker moneyness rules, the per-leg bid/mid/ask, a limit credit or debit to work, and
+inline warnings (for example, a name trading materially below its long-term trend, or a
+spread whose credit-to-width ratio is too thin). Candidates are ordered by their
+expected-value ranking so the most attractive sit at the top. These blocks are
+recommendations to be entered manually, never orders the system places.
+
+**Position health and discipline.** A position-health section reports each open
+position's status as green, yellow, or red against its loss line, collapsing the healthy
+positions to a count so that the ones needing attention stand out. A discipline prompt
+surfaces any position the trader earlier flagged as one they might not hold under real
+money — the paper-to-live psychological-gap check — so that those positions get a second
+look.
+
+**Macro-concentration warnings.** When more than one candidate clears on the same evening,
+the alert checks whether they share a macro-sensitivity tier (section 6) and, if so,
+appends a cross-sector concentration warning. This is informational — it does not block
+anything — but it makes a hidden correlation visible at the moment of decision.
+
+The alert is designed to be read top to bottom in a few minutes. The discipline it
+encodes is that no position should reach a loss cap or a management deadline without the
+trader having been told, in plain language and ahead of time, that it was coming.
+
+---
+
+## 10. The Dashboard
+
+Alongside the daily email, the system runs a live dashboard the trader can open in a
+browser at any time. Where the alert is a once-a-day snapshot, the dashboard is the
+interactive view — useful for looking deeper into anything the alert surfaces, or for
+checking the book mid-cycle. It is organized as a set of pages:
+
+- **Open Positions** — every open position with its current mark, its distance from its
+  loss-cap line, and whether it has crossed the twenty-one-day management threshold.
+- **Daily Alert** — the same content as the email, rendered for the screen, so the latest
+  alert can be re-read without digging through email.
+- **Cohorts** — which names belong to each structure's cohort and which carry validated
+  per-ticker recommendations for moneyness or wing width.
+- **Analytics** — cross-trade learning queries over the trade ledger: how structures and
+  names have performed, each reported with its sample size and an honest adequacy flag so
+  that thin evidence is never mistaken for a conclusion.
+- **Post-Mortem** — the interpretive synthesis produced after each cycle closes
+  (section 11).
+- **Bond Portfolio** — the held-to-maturity fixed-income side of the account, kept
+  visible alongside the options book for a complete picture of capital.
+- **Macro Brief** — the current macro and rate-path backdrop, including the Fed-path
+  probabilities the system ingests.
+- **Pre-Cycle** — the morning's AI read of the setup for the cycle ahead.
+- **Auto-Promotion** — the pipeline that watches names earning their way toward cohort
+  membership, so the promotion process is auditable.
+- **Filled Book** — a read-only, spread-level view of real filled orders reconciled from
+  the brokerage, with credit or debit, fees, and realized profit and loss. This is the
+  honest record of what was actually traded, kept separate from the algorithm's
+  recommendations.
+
+The dashboard reads from the same single database the rest of the system writes to, so
+what it shows is always consistent with the alert and the post-mortem.
+
+---
+
+## 11. The Life of a Cycle
+
+It helps to follow a single position from birth to post-mortem, because the daily rhythm
+above is really the support structure for this longer arc. The natural unit of the system
+is the monthly options-expiration cycle.
+
+**Entry.** Roughly forty-five days before a monthly expiration (seventy-five for the
+ZEBRA structure), the qualifier begins flagging eligible names. On a morning when a name
+clears its gates, that afternoon's alert carries a construction block with the structure,
+strikes, and a limit price. The trader reviews it, and if they agree, enters the order by
+hand at the brokerage. Earnings-bias positions are the exception to the timing: they
+enter one or three days before a scheduled announcement.
+
+**Holding and management.** Once a position is open, the system marks it every afternoon
+and reports its health in the alert. Three things can call for an exit, and whichever
+comes first is the one taken: the position reaches its fifty-percent profit target; it
+reaches the twenty-one-day management cue, at which point the decay-versus-tail-risk
+math has turned against continuing to hold; or it touches its loss-cap line at twice the
+entry credit. The alert flags each of these as it approaches, with the numbers to act on.
+Every credit spread is meant to carry a stop at twice its entry credit from the moment it
+is opened, so the maximum loss is bounded before the position is ever at risk — but
+because the system never places orders, the trader enters that protective stop manually,
+just as they enter the opening order.
+
+**Close.** When the trader closes a position — at a target, at the management deadline, at
+a stop, or by judgment — they report the close to the system, which updates its records.
+After go-live, the brokerage reconciler also picks the fill up automatically from the
+account and keeps the filled book in sync, net of fees.
+
+**Post-mortem.** After a cycle's expiration has passed, the system runs a post-mortem. It
+reads every artifact it generated during that cycle through a sealed reasoning framework
+and produces an interpretive synthesis aimed at one question: was the framework executed
+consistently, and where did discipline drift? A central tool here is the
+held-to-expiration counterfactual — what the cycle's profit *would* have been had every
+spread simply been held to expiration. The gap between that number and what was actually
+realized is the cycle's discipline scoreboard: a positive gap means profit was left on
+the table by closing winners early; a negative gap means losing positions were correctly
+cut before they reached their caps. No single cycle proves anything — the system is
+explicit that one cycle describes rather than validates — but the trend in that gap across
+many cycles is the most honest measure the system keeps of whether the doctrine is being
+followed.
+
+---
+
+## 12. Routine Maintenance and What Can Break
+
+The system is built to run unattended, but a small number of things need a human, and a
+few failure modes are worth knowing about.
+
+**The weekly brokerage re-authorization.** The brokerage's security model requires the
+data connection to be re-authorized through an interactive login once every seven days.
+This cannot be automated — it is a hard limit imposed by the brokerage. The system gives
+two days of warning before the deadline through its morning health check, and the chore
+itself is a single command run once a week. If the re-authorization lapses, the system
+loses its read-only data feed until it is renewed; it cannot lose the ability to trade,
+because it never had it.
+
+**Failure alerts.** Every scheduled job runs through a wrapper that emails the trader if
+the job fails, and a separate morning heartbeat raises an alarm for any job that should
+have run but did not appear at all. Behind both sits an external dead-man's-switch
+service: if the whole machine were to go dark — losing power, losing network — the
+absence of the expected check-in trips an alert from the outside, so a total outage
+cannot pass unnoticed. The design principle is that a silent failure is the only
+unacceptable kind; a loud one the trader can respond to.
+
+**Backups and restore.** The database is backed up every morning with an
+integrity-checked, consistent snapshot, keeping a rolling week of copies and pruning
+older ones only after a new good backup is confirmed. A tested restore procedure exists
+and is documented, so a corrupted database is a recoverable event rather than a
+catastrophe.
+
+**Data staleness.** When a data feed goes stale, the system marks the affected figures as
+stale in the alert rather than silently presenting old numbers as current. The operating
+rule is that stale data may inform context but must never be the basis for a live trading
+decision; the trader treats a stale flag as a reason to verify before acting.
+
+For day-to-day operation, the maintenance burden comes down to one recurring task — the
+weekly re-authorization — plus responding to the occasional failure email. Everything
+else maintains itself.
+
+---
+
+## 13. Paper-Test Discipline and Going Live
+
+The system is run under a deliberate paper-testing regime before any real capital is
+committed. Through the paper-test window, every recommendation is tracked exactly as it
+would be in live trading — same gates, same sizing, same management rules — but the trades
+are recorded on paper rather than placed with money. The purpose is to accumulate enough
+real, forward, out-of-sample cycles to judge whether the framework holds up outside the
+backtest, and to surface the psychological gap between what is easy to hold on paper and
+what one would actually hold under real money.
+
+The paper-test window is binding. It is not shortened because a result looks compelling,
+and it is governed by pre-registered falsification criteria: each structure has a written
+standard it must meet — a minimum number of closed cycles, positive expectancy at the
+friction actually incurred rather than the friction assumed in backtest — and failing that
+standard forces a rewrite of the relevant part of the plan rather than an extension of the
+testing. Quietly rolling the paper-test forward to avoid a verdict is itself recognized as
+a failure mode and ruled out in advance.
+
+When the window closes and the framework has earned its keep, "going live" is a single
+human decision: the trader begins entering the system's recommendations with real money
+instead of on paper. At that point the paper-trading records are purged so the book starts
+clean, while every piece of collected market and signal history is preserved — the
+research substrate is just as valid for live trading as it was for paper. The mechanics of
+trading do not change at go-live, because the system never traded in the first place. What
+changes is only the trader's decision to act on its advice with real capital.
+
+---
+
+*Part I is roughly 2,900 words; Part II adds the operating guide. Together the document is
+both an explanation of how the system works and a guide to running it. The canonical,
+version-controlled mechanics remain in `TRADING_PLAN.rtf`.*

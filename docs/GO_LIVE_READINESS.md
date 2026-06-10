@@ -159,7 +159,7 @@ a single-flag `--apply`). NOT wired to cron — operator-run once at cutover.
 
 | # | Item | Tier | Status | Evidence / notes |
 |---|---|---|---|---|
-| H1 | `PROJECT_OVERVIEW.md` → shareable explanatory text + user's guide | T2 | 🟡 | Parallel workstream — `project_go_live_plan`. |
+| H1 | `PROJECT_OVERVIEW.md` → shareable explanatory text + user's guide | T2 | ✅ | **Done 2026-06-10.** Restructured into Part I (explanatory text, the existing §1–6) + **Part II (user's guide, new §7–13)**: advisory principle, daily operating rhythm (grounded in the real launchd schedule), reading the daily alert, the dashboard (10 pages), life of a cycle, maintenance/failure-handling, paper-test→go-live. Added a "How to read this document" orientation + advisory-only framing up top; corrected the subtitle from "research and **execution** system" → "decision-support" (the old wording contradicted [[feedback_never_execute_trades]]). Canonical mechanics stay in `TRADING_PLAN.rtf`. Note: §8 + §12 partially pre-cover H2 (operator runbook) at a narrative level. |
 | H2 | Operator runbook: daily flow, what each cron does, how to intervene | T2 | ⬜ | |
 | H3 | Go-live cutover checklist (the literal steps on go-live day) | T1 | ⬜ | Includes executing section E. |
 
