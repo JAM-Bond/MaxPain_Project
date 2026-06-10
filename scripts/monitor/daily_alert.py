@@ -481,8 +481,8 @@ def credit_captured_status(conn, trade_id: int, entry_credit: float) -> dict | N
             "pct": None,
             "mark_date": None,
             "stale": True,
-            "error": (f"no marks found in spread_score_daily for trade_id={trade_id} — "
-                      "profit-target alert cannot fire (mark daemon disabled?)"),
+            "error": (f"no daily mark yet for trade_id={trade_id} (opened after the 16:20 "
+                      "mark, or its quote was unavailable) — profit-target % unavailable today"),
         }
     mark = float(row[0])
     mark_date_str = row[1]
@@ -499,7 +499,8 @@ def credit_captured_status(conn, trade_id: int, entry_credit: float) -> dict | N
             "mark_date": mark_date_str,
             "stale": True,
             "error": (f"latest mark is {age_days}d old (mark_date {mark_date_str}) — "
-                      "profit-target alert may be inaccurate (mark daemon disabled?)"),
+                      "profit-target % may be stale (a daemon outage would also trip the "
+                      "mark-cron failure alert + heartbeat)"),
         }
     return {
         "pct": pct,
