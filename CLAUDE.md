@@ -2,6 +2,14 @@
 
 Context for Claude Code working in this directory.
 
+> ## ⛔ ABSOLUTE RULE — NEVER EXECUTE TRADES
+> The system is **advisory only**. NEVER place, submit, modify, replace, or cancel any
+> order/trade — by API, script, cron, or any other means — at any time, under any
+> circumstances. No "test" or unfillable orders either. Do not build, keep, wire, or
+> schedule any order-execution code. Read-only Schwab access (data) is fine. The **user
+> places every trade manually**. This rule is always in effect and must never be
+> violated. See auto-memory `feedback_never_execute_trades.md`.
+
 ## What this is
 
 The active home of the max pain trading system (v2.4+). Live infrastructure: 9:20/9:25/4:16/4:20/4:25/4:45 ET crons, the 8503 Streamlit dashboard (`com.maxpain.dashboard` launchd), the daily alert + cycle qualifier + post-mortem stack, the trade ledger, and the AI advisor. Paper-test window through ~2026-08-19, then live.

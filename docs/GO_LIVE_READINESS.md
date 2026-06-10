@@ -7,6 +7,12 @@ status + evidence as each item is worked._
 See also: [[project_go_live_plan]] (the month plan), `docs/PROJECT_OVERVIEW.md`
 (the explanatory text / user's guide, item 2), `docs/TRADING_PLAN.rtf` (mechanics + gates).
 
+> **ABSOLUTE RULE — the system never executes trades.** It is **advisory only**: it
+> recommends, the **user places every order manually**. No code may place / modify /
+> cancel an order, ever. "Go-live" = the user starts trading the recommendations by
+> hand with real money. See [[feedback_never_execute_trades]]. This voids any
+> "order-path" work and removes the live-execution blockers below.
+
 ---
 
 ## How this is scored
@@ -33,11 +39,12 @@ original AUDIT.md 5-tier scorecard) and a **Status** (current readiness).
 
 | # | Item | Tier | Status | Evidence / notes |
 |---|---|---|---|---|
-| A1 | Live **order placement** path tested (place / modify / cancel a real order) | T0 | 🔴 | Only **read** access verified to date — `reference_schwab_account_api_access`. The write path is unproven. |
+| A1 | ~~Live order placement path~~ — **VOID by absolute rule** | — | ✅ | **2026-06-10: the system NEVER executes/places/modifies/cancels orders — absolute, always-in-effect rule ([[feedback_never_execute_trades]]).** There is no programmatic order path by design. Order-execution code created earlier this session (`lib/schwab_orders.py`) was DELETED. "Go-live" = the USER starts placing real trades MANUALLY from the recommendations. |
+| A1b | No order-execution capability exists in the codebase | T0 | ✅ | Verified 2026-06-10: `lib/schwab_orders.py` removed; no module can place/cancel. Note: the read-only token technically *could* trade (Schwab ignores `scope=readonly`), which is exactly why no execution code may exist — the guard is "no such code," not the scope. Keep it that way. |
 | A2 | Schwab OAuth refresh robust under cron (file-locked, no interactive prompt) | T1 | 🔴 | **Refresh token expired/revoked as of 2026-06-09** → live chains return empty; close-side table + construction enrichment degraded until manual `Schwab/auth.py --force-reauth`. Schwab refresh tokens expire ~weekly and re-auth is interactive → recurring go-live risk. (stdout-leak sub-issue fixed in G1.) |
 | A3 | Schwab **fills ingestion** correct for live option spreads | T1 | 🟡 | `ingest_schwab_fills` cron live-validated on CDs/HCA; option path unit-tested only — `project_trade_ledger_phase1_built`. |
 | A4 | **Fills → spread-row matcher** (orderId grouping, propose-only) | T1 | 🔴 | Open go-live remnant — `project_session_20260609_handoff`. |
-| A5 | Paper vs live account separation is unambiguous (no live order from a paper rec by mistake) | T0 | ⬜ | Define the guardrail: how does the system know an order is live? |
+| A5 | Paper vs live is unambiguous | T1 | ✅ | Moot under the no-execution rule — the system never sends an order, so it can't send a "live" one by mistake. "Going live" is purely the user's manual decision to start trading the recs with real money. |
 
 ## B. Infrastructure & reliability
 
@@ -55,7 +62,7 @@ original AUDIT.md 5-tier scorecard) and a **Status** (current readiness).
 |---|---|---|---|---|
 | C1 | `gate_config.py` ↔ `TRADING_PLAN.rtf` consistency (mechanics + gates match) | T1 | ⬜ | |
 | C2 | EV-rank tiebreaker + concentration caps behave under live slate | T2 | 🟡 | Built + tested; over-cap path not yet exercised live — `project_ev_rank_tiebreaker`. |
-| C3 | Loss-cap (2× rule) + stop policy (STP LMT GTC) enforced on every live order | T0 | ⬜ | `feedback_loss_cap_discipline`, `project_credit_spread_stop_policy`. Real money → this is a blocker. |
+| C3 | Loss-cap (2× rule) + stop policy surfaced for the user to apply manually | T1 | 🟡 | `feedback_loss_cap_discipline`, `project_credit_spread_stop_policy`. Not system-enforced (no execution) — these are advisory; the alert already surfaces stop/T-21/loss-cap. Audit that the recommendations consistently carry them. |
 | C4 | Active structures only (bull_put / bear_call / inverted_fly / zebra); rejected ones can't be placed | T1 | ⬜ | `project_active_trading_styles`. Note: KO **iron_condor** row exists in the book + errors in the alert — a rejected structure leaked into the book. |
 | C5 | Qualifier verdict logic (GO/DOWNSIZE/etc.) sound for live sizing | T1 | ⬜ | `reference_cycle_qualifier_v1`. |
 
@@ -106,7 +113,7 @@ history (`cohort_changes`) carry into live; (3) exact NULL-REFS plan for
 
 | # | Item | Tier | Status | Evidence / notes |
 |---|---|---|---|---|
-| F1 | Defined-risk only; no naked exposure can be placed live | T0 | ⬜ | `user_trading_focus`. |
+| F1 | Defined-risk only — system only *recommends* defined-risk structures | T1 | 🟡 | `user_trading_focus`. No execution, so "can't place naked" is automatic; the audit is that the recommended structures are all defined-risk (they are: bull_put/bear_call/inverted_fly/zebra). User executes manually. |
 | F2 | Crash-hedge sizing reviewed for live book | T2 | ⬜ | Revisit early Sept — `project_crash_hedge_sizing`. |
 | F3 | Position-size / concentration caps enforced on live orders | T1 | ⬜ | |
 | F4 | Fees applied to live P/L (paper was gross-only) | T2 | ⬜ | `feedback_paper_pnl_gross_only` — Schwab supplies at live. |
@@ -133,5 +140,11 @@ history (`cohort_changes`) carry into live; (3) exact NULL-REFS plan for
 
 _Update as items close._
 
-- **T0 blockers open:** A1 (live order path), A5 (paper/live separation), C3 (loss-cap/stop on live), F1 (defined-risk enforcement). All 🔴/⬜.
-- **Next actions:** scaffold complete → begin working A (execution) and E (manifest) in parallel; G1 runs as its own formatting thread.
+- **Execution blockers (A1/A5/C3/F1): CLOSED/void** by the no-execution rule — the
+  system is advisory; the user trades manually. This materially de-risks go-live (no
+  live order path to harden).
+- **T0 blockers remaining:** none in execution. Real go-live focus shifts to:
+  advisory-output quality + discipline surfacing (C3/F1 as advisory checks),
+  reliability (B), data integrity (D), and the paper-purge manifest (E).
+- **Next actions:** work B (infra reliability) + E (manifest); G1 (alert clarity)
+  continues; H (the shareable docs) in parallel.
