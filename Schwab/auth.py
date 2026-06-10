@@ -234,6 +234,16 @@ def refresh_access_token(client_id: str, client_secret: str, token: dict) -> dic
     # Preserve refresh token if the new response doesn't include one
     if "refresh_token" not in new_token:
         new_token["refresh_token"] = refresh_token
+    # Refresh-token issue time: Schwab returns the SAME refresh token on a refresh
+    # grant (verified 2026-06-10 — not rotated), so its 7-day clock runs from the
+    # last BROWSER re-auth, NOT from now. _post_token bumps received_at to now, but
+    # we must NOT bump the refresh-token clock — carry it forward. Only reset it if
+    # Schwab ever actually hands back a DIFFERENT refresh token (future-proofing).
+    if new_token["refresh_token"] == refresh_token:
+        new_token["refresh_token_issued_at"] = (
+            token.get("refresh_token_issued_at") or token.get("received_at"))
+    else:
+        new_token["refresh_token_issued_at"] = new_token.get("received_at", time.time())
     return new_token
 
 
@@ -252,14 +262,16 @@ def is_refresh_token_expired(token: dict) -> bool:
     If received_at is missing or zero, treat as expired — forces re-auth
     rather than attempting a refresh that will fail with a cryptic error.
     """
-    received_at = token.get("received_at", 0)
-    if not received_at:
-        print("  WARNING: Token has no received_at timestamp — treating as expired.")
+    # Anchor on the refresh-token issue time (set at browser re-auth), NOT received_at
+    # — received_at is bumped on every access-token refresh and would mask the true
+    # 7-day expiry (the bug that caused the silent 2026-06-09 mid-day failure).
+    issued_at = token.get("refresh_token_issued_at") or token.get("received_at", 0)
+    if not issued_at:
+        print("  WARNING: Token has no issue timestamp — treating as expired.")
         return True
     seven_days  = 7 * 24 * 3600
     buffer      = 10 * 60
-    expires_at  = received_at + seven_days - buffer
-    remaining   = expires_at - time.time()
+    expires_at  = issued_at + seven_days - buffer
     return time.time() >= expires_at
 
 
@@ -337,6 +349,10 @@ def browser_authorization_flow(client_id: str, client_secret: str) -> dict:
 
     print("  ✓ Access token received")
     print("  ✓ Refresh token received")
+    # A browser re-auth is the ONLY event that issues a new refresh token, which
+    # starts a fresh 7-day clock. Stamp that here (distinct from received_at, which
+    # the per-access-token refresh bumps every ~30 min). See refresh_access_token.
+    token["refresh_token_issued_at"] = token.get("received_at", time.time())
     return token
 
 

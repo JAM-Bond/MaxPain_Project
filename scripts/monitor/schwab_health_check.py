@@ -94,18 +94,21 @@ def _load_project_auth(project: str):
 def days_until_refresh_token_expires(load_token) -> float | None:
     """Return remaining refresh-token TTL in days. None if no token persisted.
 
-    Schwab refresh tokens last 7 days from issue. We compute remaining time
-    against received_at + 7 days minus a small buffer.
+    Schwab refresh tokens last 7 days from ISSUE (browser re-auth). Anchor on
+    refresh_token_issued_at, NOT received_at — received_at is bumped on every
+    access-token refresh (~30 min) and would perpetually read ~7 days, masking the
+    real expiry (the bug behind the silent 2026-06-09 failure). Falls back to
+    received_at only for legacy tokens that predate the issued-at field.
     """
     token = load_token()
     if token is None:
         return None
-    received_at = token.get("received_at", 0)
-    if not received_at:
+    issued_at = token.get("refresh_token_issued_at") or token.get("received_at", 0)
+    if not issued_at:
         return None
     seven_days = 7 * 24 * 3600
     buffer = 10 * 60
-    expires_at = received_at + seven_days - buffer
+    expires_at = issued_at + seven_days - buffer
     remaining = expires_at - time.time()
     return remaining / 86400
 
