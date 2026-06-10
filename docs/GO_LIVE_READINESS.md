@@ -131,6 +131,13 @@ hard trade references (`cycle_qualifier_runs` has no trade/outcome columns;
 5. Keep everything else incl. `order_legs` + `schwab_fills` (real).
 6. From go-live, the order reconciler + crons repopulate the book from real fills.
 
+**Purge migration BUILT 2026-06-10:** `scripts/migrations/010_purge_paper_book.py`
+— dry-run by default; requires BOTH `--apply` AND `--yes-purge-paper-book` (accidental-run
+guard, must never fire during paper); auto-takes a consistent safety backup before any
+delete; asserts `order_legs`/`schwab_fills` row counts unchanged; idempotent. Dry-run
+validated (1,302 paper rows across the 6 tables; real-data tables untouched; guard refuses
+a single-flag `--apply`). NOT wired to cron — operator-run once at cutover.
+
 ## F. Risk controls & money safety
 
 | # | Item | Tier | Status | Evidence / notes |
