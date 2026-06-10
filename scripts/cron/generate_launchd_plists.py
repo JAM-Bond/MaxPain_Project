@@ -81,6 +81,11 @@ AGENT_SCRAPERS = [
     ("agent_fred",       9, 0, f"cd {AGENT_DIR} && {PY} FRED/scraper.py",       f"{AGENT_LOG}/fred.log"),
     ("agent_bls",        9, 2, f"cd {AGENT_DIR} && {PY} BLS/scraper.py",        f"{AGENT_LOG}/bls.log"),
     ("agent_yieldcurve", 9, 5, f"cd {AGENT_DIR} && {PY} YieldCurve/scraper.py", f"{AGENT_LOG}/yieldcurve.log"),
+    # FedWatch API ingester — was a standalone com.agentproject.fedwatch plist running
+    # the ingester directly (no run_cron.sh → no status file → no heartbeat coverage).
+    # Brought under run_cron.sh 2026-06-10; same com.agentproject.fedwatch label, log,
+    # and weekday-06:15 schedule, now monitored.
+    ("agent_fedwatch",   6, 15, f"cd {AGENT_DIR} && {PY} CME_FedWatch/api_ingester.py", f"{AGENT_LOG}/fedwatch.log"),
 ]
 
 # Other Agent_Project scheduled agents — brought under run_cron.sh for

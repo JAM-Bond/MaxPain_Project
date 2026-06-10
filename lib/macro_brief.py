@@ -115,9 +115,13 @@ def get_curve_summary() -> dict[str, Any]:
 def get_fedwatch_summary(n_meetings: int = 4) -> dict[str, Any]:
     """Next N FOMC meetings, sorted by meeting date."""
     db = _client()
-    res = db.query_by_metadata("cme_fedwatch_current",
-                               {"source": "CME_FedWatch_CSV"})
-    if not res:
+    # Read the whole dedicated collection — do NOT filter by a hardcoded source tag.
+    # The CSV→API migration changed source ("CME_FedWatch_CSV"→"CME_FedWatch_API"), and
+    # the stale filter silently matched nothing → "empty" in the alert while history
+    # (which uses get_all_documents) kept working. The collection is FedWatch-only and
+    # wiped+rebuilt each ingest, so reading all docs is correct + migration-proof.
+    res = db.get_all_documents("cme_fedwatch_current")
+    if not res or not res.get("metadatas"):
         return {"ok": False, "error": "cme_fedwatch_current empty"}
 
     rows = []

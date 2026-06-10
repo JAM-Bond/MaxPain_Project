@@ -77,6 +77,7 @@ def ping_deadman() -> None:
 # run_cron.sh. Non-daily jobs (e.g. quarterly_cohort_refresh) are excluded.
 EXPECTED_DAILY = [
     ("agent_backup",             "Agent ChromaDB backup",     3,  0),
+    ("agent_fedwatch",           "FedWatch API ingester",     6, 15),
     ("schwab_health_agent",      "Schwab health (Agent)",     7, 55),
     ("schwab_health",            "Schwab health (MaxPain)",   8,  0),
     ("backup_db",                "DB backup",                 8, 45),
