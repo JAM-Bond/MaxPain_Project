@@ -44,8 +44,8 @@ def legs_df(days: int = 90) -> pd.DataFrame:
 
 
 def order_summary_df(days: int = 90) -> pd.DataFrame:
-    """One row per Schwab order: legs rolled up to net price (SELL +, BUY −) + fees.
-    This is the 'mirror, grouped by spread' view."""
+    """One row per Schwab order, presented as a SPREAD with the credit/debit received
+    — leg prices stay under the hood (used for dedup + P/L), not surfaced here."""
     legs = legs_df(days)
     if legs.empty:
         return legs
@@ -53,27 +53,26 @@ def order_summary_df(days: int = 90) -> pd.DataFrame:
     legs["signed"] = legs.apply(
         lambda r: (r["fill_price"] if "SELL" in str(r["instruction"]) else -r["fill_price"]),
         axis=1)
-    g = legs.groupby("order_id")
     rows = []
-    for oid, sub in g:
-        sub = sub.sort_values("leg_id")
+    for oid, sub in legs.groupby("order_id"):
+        sub = sub.sort_values("strike", ascending=False)
         net = round(sub["signed"].sum(), 2)
-        effect = ("OPEN" if set(sub["position_effect"]) <= {"OPENING"} else
-                  "CLOSE" if set(sub["position_effect"]) <= {"CLOSING"} else "MIXED")
+        effect = ("Open" if set(sub["position_effect"]) <= {"OPENING"} else
+                  "Close" if set(sub["position_effect"]) <= {"CLOSING"} else "Roll")
+        pcs = set(sub["put_call"].dropna())
+        pc = "P" if pcs == {"PUT"} else "C" if pcs == {"CALL"} else "P/C"
+        strikes = "/".join(f"{s:g}" for s in sorted(set(sub["strike"]), reverse=True))
+        qty = int(sub["quantity"].max() or 0)
         rows.append({
-            "order_id": oid,
-            "time": str(sub["execution_time"].iloc[0])[:16],
-            "underlying": sub["underlying"].iloc[0],
-            "legs": len(sub),
-            "effect": effect,
-            "contracts": ", ".join(
-                f"{r.instruction.split('_')[0]} {int(r.quantity)}x {r.put_call[0]}{r.strike:g}"
-                for r in sub.itertuples()),
-            "net_price": net,                # + = net credit taken in, − = net debit paid
-            "fees": round(sub["fees"].sum(), 2),
-            "order_type": sub["order_type"].iloc[0],
+            "Date": str(sub["execution_time"].iloc[0])[:10],
+            "Symbol": sub["underlying"].iloc[0],
+            "Spread": f"{strikes} {pc}",
+            "Qty": qty,
+            "Side": effect,
+            "Credit/Debit": net,            # + = credit received, − = debit paid
+            "Fees": round(sub["fees"].sum(), 2),
         })
-    return pd.DataFrame(rows).sort_values("time", ascending=False).reset_index(drop=True)
+    return pd.DataFrame(rows).sort_values("Date", ascending=False).reset_index(drop=True)
 
 
 def reconciled_positions_df() -> pd.DataFrame:
