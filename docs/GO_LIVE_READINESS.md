@@ -78,36 +78,58 @@ original AUDIT.md 5-tier scorecard) and a **Status** (current readiness).
 ## E. Data disposition manifest (paper-purge plan) — first-class section
 
 **Requirement:** at go-live the DB must be **pristine of paper-trading activity**; all
-**collected market/signal data is kept** (applies to live). The line is not clean
-per-table — decide per-table, sometimes per-row. **Execute LAST** (final pre-go-live
-window), via backup → dry-run → guarded idempotent migration (cf. 006/007).
+**collected market/signal data is kept** (applies to live). **Execute LAST** (final
+pre-go-live window), via backup → dry-run → guarded idempotent migration (cf. 006/007).
+"DELETE" = **delete the rows, keep the schema** (the table stays; crons/reconciler
+repopulate it with real data at go-live).
 
-_First pass from the 20-table inventory (2026-06-09). Action ∈ {KEEP, DELETE, SCRUB-COLS, NULL-REFS}. Refine + confirm before any execution._
+_Refreshed from the 21-table inventory 2026-06-10 (was a 20-table first pass on 6/9).
+Key finding: **NULL-REFS is a non-issue** — every table that carries a `trade_id`
+(`position_health_snapshots`, `psychological_gap_log`, `spread_score_daily`,
+`trade_ledger_enriched`) is itself in the DELETE bucket, and the KEEP tables hold NO
+hard trade references (`cycle_qualifier_runs` has no trade/outcome columns;
+`cohort_changes` links only by date/ticker). So nothing dangles after the purge._
 
-| Table | Rows | Classification | Proposed action | Notes |
+| Table | Rows | Classification | Action | Notes |
 |---|---:|---|---|---|
-| `spread_score_trades` | 133 | paper book | **DELETE** | The paper book itself. |
-| `trade_ledger_enriched` | 133 | paper book | **DELETE** | Snapshot-at-entry of paper trades. |
-| `spread_score_daily` | 730 | paper book | **DELETE** | Daily marks of paper positions. |
-| `position_health_snapshots` | 287 | paper book | **DELETE** | Per-paper-position health. |
-| `trade_log` | 11 | paper book | **DELETE** | Legacy stock paper trades. |
-| `psychological_gap_log` | 1 | paper book | **DELETE** | Paper psych entries. |
-| `live_snapshots` | 4,127 | collected data | **KEEP** | Market data. |
-| `regime_state` | 3,238 | collected data | **KEEP** | Regime history. |
+| `spread_score_trades` | 133 | paper book | **DELETE rows** | The paper book. Reconciler repopulates from real orders at go-live. |
+| `trade_ledger_enriched` | 133 | paper book (`trade_id`) | **DELETE rows** | Snapshot-at-entry of paper trades; `snapshot_ledger` cron refills live. |
+| `spread_score_daily` | 737 | paper book (`trade_id`) | **DELETE rows** | Paper marks; mark daemon refills for live positions. |
+| `position_health_snapshots` | 287 | paper book (`trade_id`) | **DELETE rows** | Refills daily at live. |
+| `trade_log` | 11 | legacy paper | **DELETE rows** | Legacy stock paper trades (consider dropping the table if truly unused). |
+| `psychological_gap_log` | 1 | paper book (`trade_id`) | **DELETE rows** | Paper psych entries. |
+| `order_legs` | 2 | **REAL Schwab mirror** | **KEEP** | Real filled-order legs (the HCA real order). NOT paper. |
+| ⚠️ `schwab_fills` | 7 | **REAL account data** | **KEEP** | Real CD/HCA reads — must NOT be deleted. |
+| `live_snapshots` | 4,285 | collected data | **KEEP** | Market data. |
+| `regime_state` | 3,239 | collected data | **KEEP** | Regime history. |
 | `regime_health_snapshots` | 434 | collected data | **KEEP** | |
 | `regime_health_composites` | 186 | collected data | **KEEP** | |
 | `bear_call_census_daily` | 31 | collected data | **KEEP** | |
-| `cycle_qualifier_runs` | 4,622 | collected data (signal output) | **KEEP + NULL-REFS** | Keep the signal record; but `qualifier_run_date` outcome-links to purged trades → scrub/null the links. |
+| `cycle_qualifier_runs` | 4,834 | signal output | **KEEP** | No trade refs → no scrub needed (the qualifier↔trade link lives on the deleted trade row). |
+| `cohort_changes` | 480 | process/research | **KEEP** | Promotion-decision history; no trade refs; applies to live. Promote→outcome dashboard join shows live outcomes going forward. |
+| `alert_history` | 391 | output archive | **KEEP** | No trade-id columns; operational history, useful for post-mortem. Optional: clear for a clean "live era" slate. |
+| `daily_alert_runs` | 23 | output archive | **KEEP** | Same as alert_history. |
 | `alert_thresholds` | 47 | config | **KEEP** | |
-| `ai_advisor_cache` / `ai_pre_cycle_cache` / `ai_macro_brief_cache` | 8 | regenerable cache | **KEEP** (or clear) | Regenerates; harmless either way. |
-| ⚠️ `schwab_fills` | 7 | **REAL account data** | **KEEP (review per-row)** | Holds real CD/HCA reads, **not paper** — must NOT be blanket-deleted. |
-| `cohort_changes` | 474 | process/research | **KEEP (tentative)** | Auto-promotion decisions; decide whether promotion history carries to live. |
-| `alert_history` | 391 | system output archive | **DECIDE** | References paper recs; keep as archive or scrub paper rows? |
-| `daily_alert_runs` | 22 | system output archive | **DECIDE** | Same question as alert_history. |
+| `ai_advisor_cache` / `ai_pre_cycle_cache` / `ai_macro_brief_cache` | 8 | regenerable cache | **KEEP** | Regenerates; harmless. |
 
-**Open manifest decisions:** (1) keep vs scrub the alert archives; (2) does promotion
-history (`cohort_changes`) carry into live; (3) exact NULL-REFS plan for
-`qualifier_run_date` and any `trade_id` foreign-ish links once the book is purged.
+### Resolved decisions (recommendations for sign-off)
+1. **alert archives (`alert_history`, `daily_alert_runs`) → KEEP.** They have no
+   trade-id columns and aren't the trade book; keeping preserves post-mortem
+   reconstruction continuity. (Optional: clear them if you want a visually clean
+   live-era archive — harmless either way, no refs.)
+2. **`cohort_changes` → KEEP.** Promotion-decision history is process/research, not
+   paper-trade activity, and the promotion logic continues at live.
+3. **qualifier NULL-REFS → NO ACTION.** The feared dangling links don't exist —
+   `cycle_qualifier_runs` stores no trade references; the link is the
+   `qualifier_run_date` column on the (deleted) trade rows.
+
+### Execution sequence (go-live cutover, runs LAST)
+1. Final paper post-mortem (capture paper results before the purge).
+2. Backup (the restore-tested `backup_db.sh`).
+3. Dry-run the purge migration; review counts.
+4. Apply: `DELETE FROM` the 6 paper-book tables (rows only, schema kept).
+5. Keep everything else incl. `order_legs` + `schwab_fills` (real).
+6. From go-live, the order reconciler + crons repopulate the book from real fills.
 
 ## F. Risk controls & money safety
 
