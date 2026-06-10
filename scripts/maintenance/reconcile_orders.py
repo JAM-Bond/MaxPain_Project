@@ -26,7 +26,8 @@ def main() -> int:
 
     rep = reconcile(days=args.days, dry_run=not args.apply)
     mode = "APPLIED" if args.apply else "DRY-RUN"
-    print(f"=== Order reconciler ({mode}, last {args.days}d) ===\n")
+    print(f"=== Order reconciler ({mode}, last {args.days}d) ===")
+    print(f"order_legs mirror: {rep['legs_new']} new leg(s)\n")
 
     if rep["inserts"]:
         print(f"NEW positions to open ({len(rep['inserts'])}):")
@@ -44,7 +45,7 @@ def main() -> int:
         for c in rep["closes"]:
             print(f"  ✓ trade {c['trade_id']} {c['symbol']:<6} {c['spread_type']:<12} "
                   f"{c['strikes']:>11} x{c['shares']}  entry {c['entry_credit']:+.2f} "
-                  f"exit {c['exit_price']:.2f} fees {c['fees_total']:.2f} -> "
+                  f"exit {c['exit_credit']:+.2f} fees {c['fees_total']:.2f} -> "
                   f"net P/L ${c['final_pnl']:+.0f} ({c['exit_date']}) order={c['close_order_id']}")
     if rep["skipped"]:
         print(f"\nSkipped (already recorded) ({len(rep['skipped'])}):")
