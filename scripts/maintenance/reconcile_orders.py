@@ -22,9 +22,12 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--apply", action="store_true", help="write to the DB (default: dry-run)")
     ap.add_argument("--days", type=int, default=5, help="lookback window for FILLED orders")
+    ap.add_argument("--mirror-only", action="store_true",
+                    help="write ONLY the order_legs mirror; don't touch spread_score_trades "
+                         "(safe to populate the Schwab mirror during paper)")
     args = ap.parse_args()
 
-    rep = reconcile(days=args.days, dry_run=not args.apply)
+    rep = reconcile(days=args.days, dry_run=not args.apply, mirror_only=args.mirror_only)
     mode = "APPLIED" if args.apply else "DRY-RUN"
     print(f"=== Order reconciler ({mode}, last {args.days}d) ===")
     print(f"order_legs mirror: {rep['legs_new']} new leg(s)\n")

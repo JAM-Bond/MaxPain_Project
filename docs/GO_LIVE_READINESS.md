@@ -123,7 +123,7 @@ history (`cohort_changes`) carry into live; (3) exact NULL-REFS plan for
 | # | Item | Tier | Status | Evidence / notes |
 |---|---|---|---|---|
 | G1 | Daily alert is **clear and unambiguous** (the active formatting workstream) | T2 | 🟡 | **Round 1 done 2026-06-09:** fixed token-refresh stdout leak (now cron-log only), de-duplicated errors, iron_condor handled as "Not priced" (no false "mark daemon disabled"), removed redundant 52-week section, relabeled IF-cohort as context-only, redesigned close-side table (LIMIT/P&L action-first, cr/db entry tags, mid→worst fill range). **Round 2 done 2026-06-09:** light de-dupe (POSITION HEALTH collapses healthy 🟢 to a count; PSYCH-GAP compacted to grouped id lines referencing POSITION HEALTH) + close-candidate reasons now state the concrete "why" (strike cushion/breach + regime). **Remaining:** spot timestamp differs across sections (POSITION HEALTH=EOD snapshot vs close_helper=live Schwab) — align later; deeper restructure into a single per-position block deferred (user chose light). |
-| G2 | Dashboards reflect live (not paper) state post-purge | T2 | ⬜ | |
+| G2 | Dashboards reflect live (not paper) state post-purge | T2 | 🟡 | **Filled Book page added 2026-06-10** (`dashboard/pages/10_Filled_Book.py` + `queries/filled_book.py`): read-only view of the real Schwab activity — orders grouped by spread, the raw `order_legs` leg mirror, and reconciled positions. Reconciler gained `--mirror-only` to populate `order_legs` during paper without writing the book. |
 | G3 | Psych-gap log / discipline prompts adapted for live | T3 | ⬜ | |
 
 ## H. Docs & runbook  *(item 2)*

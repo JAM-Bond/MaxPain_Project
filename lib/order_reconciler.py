@@ -229,7 +229,10 @@ def _match_open_position(conn: sqlite3.Connection, summary: dict) -> list[sqlite
 
 
 # ── reconcile ────────────────────────────────────────────────────────────────
-def reconcile(days: int = 5, dry_run: bool = True) -> dict:
+def reconcile(days: int = 5, dry_run: bool = True, mirror_only: bool = False) -> dict:
+    """mirror_only=True writes ONLY the leg mirror (order_legs) and does not touch the
+    spread-level book (spread_score_trades) — safe to populate the Schwab mirror during
+    the paper period without inserting real orders into the paper book."""
     orders = fetch_filled_orders(days=days)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -242,6 +245,8 @@ def reconcile(days: int = 5, dry_run: bool = True) -> dict:
             continue
         legs, s = res
         rep["legs_new"] += upsert_order_legs(conn, legs, ingested_at, dry_run)  # mirror ALWAYS
+        if mirror_only:
+            continue  # leg mirror only — do not derive/write the spread-level book
 
         oid = s["order_id"]
         if not s["recordable"]:
