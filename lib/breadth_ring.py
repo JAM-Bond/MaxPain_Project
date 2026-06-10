@@ -203,15 +203,20 @@ def persist(ring: dict, conn) -> None:
             """CREATE TABLE IF NOT EXISTS breadth_ring_daily (
                    asof TEXT PRIMARY KEY, status TEXT, rs REAL, broadening INTEGER,
                    run_days INTEGER, spy_pct_200 REAL, breadth REAL,
-                   breadth_extended INTEGER, top_warning INTEGER)"""
+                   breadth_extended INTEGER, top_warning INTEGER, source TEXT)"""
         )
+        try:  # defensive migration for tables created before the source column
+            conn.execute("ALTER TABLE breadth_ring_daily ADD COLUMN source TEXT")
+        except Exception:
+            pass
         conn.execute(
             """INSERT OR REPLACE INTO breadth_ring_daily
                (asof, status, rs, broadening, run_days, spy_pct_200, breadth,
-                breadth_extended, top_warning) VALUES (?,?,?,?,?,?,?,?,?)""",
+                breadth_extended, top_warning, source) VALUES (?,?,?,?,?,?,?,?,?,?)""",
             (ring["asof"], ring["status"], ring["rs"], int(ring["broadening"]),
              ring["run_days"], ring.get("spy_pct_200"), ring.get("breadth"),
-             int(ring["breadth_extended"]), int(ring["top_warning"])),
+             int(ring["breadth_extended"]), int(ring["top_warning"]),
+             ring.get("source", "live")),
         )
         conn.commit()
     except Exception:
