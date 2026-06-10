@@ -1721,6 +1721,23 @@ def main():
         print(f"  {'-'*68}")
         print(f"  (no changes, approaching thresholds, or developing trends)")
 
+    # ── BREADTH RING — RSP/SPY relative-strength early-warning (DESCRIPTIVE;
+    #    walk-forward validated in project_rsp_spy_breadth_signal). Trend-quality
+    #    / downside-risk read, NOT a gate and NOT a cascade vote. The refresh_breadth_ring
+    #    cron (~16:30) computes + persists it; here we READ that row (no network, no
+    #    DB write) and fall back to a live compute only if it's missing. Soft-fail. ──
+    try:
+        from lib.breadth_ring import (
+            latest_persisted_ring, compute_breadth_ring, render_text as _ring_text)
+        _ring = latest_persisted_ring(conn) or compute_breadth_ring()
+        _ring_lines = _ring_text(_ring)
+        if _ring_lines:
+            print()
+            for _l in _ring_lines:
+                print(f"  {_l}")
+    except Exception as e:
+        print(f"\n  BREADTH RING — unavailable ({e.__class__.__name__}: {e})")
+
     # ── SECTOR DRIFT WATCH — strict, descriptive early read on candidate-slate
     #    sector concentration (rotation context to help pick candidates; NOT a
     #    gate). Returns "" on a quiet day. Soft-fail: never break the alert. ──

@@ -97,6 +97,7 @@ EXPECTED_DAILY = [
     ("close_prices",             "Close-price update",       16, 16),
     ("mark_open_spreads",        "Mark open spreads",        16, 20),
     ("reconcile_qualifier",      "Qualifier reconcile",      16, 25),
+    ("refresh_breadth_ring",     "Breadth ring refresh",     16, 30),
     ("ingest_schwab_fills",      "Schwab fills ingest",      16, 22),
     ("ev_enrich",                "EV-rank enrich",           16, 35),
     ("snapshot_ledger",          "Trade-ledger snapshot",    16, 40),
