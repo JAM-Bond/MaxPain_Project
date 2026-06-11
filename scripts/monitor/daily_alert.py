@@ -1100,33 +1100,6 @@ def detect_52w_extreme_positions(positions: pd.DataFrame) -> list[str]:
     return events
 
 
-def detect_if_candidates_at_52w_lows() -> list[str]:
-    """Scan the inverted_fly cohort for names currently at (or near) 52w lows.
-
-    Per project_52w_extremes_rejected.md secondary use: 52w-low names show
-    2× baseline realized vol — long-vol territory, IF thesis confirmation.
-    Lists candidates the user does NOT necessarily hold; informational only.
-    """
-    try:
-        sys.path.insert(0, str(Path.home() / "MaxPain_Project"))
-        from scripts.qualifier import gate_config as G
-    except Exception:
-        return []
-    cohort = sorted(set(G.COHORT_INVERTED_FLY_PAIR + G.COHORT_INVERTED_FLY_SINGLE))
-    candidates = []
-    for sym in cohort:
-        result = compute_52w_status(sym)
-        if result is None:
-            continue
-        status, close, hi, lo = result
-        if status == "at_52w_low":
-            candidates.append(f"🔽 {sym} at 52w LOW (${close:.2f}) — IF setup confirmation")
-        elif status == "near_52w_low":
-            pct_from_lo = (close - lo) / lo * 100
-            candidates.append(f"⬇ {sym} approaching 52w low (${close:.2f}, {pct_from_lo:.1f}% above ${lo:.2f})")
-    return candidates
-
-
 # ─── Entry window alerts ──────────────────────────────────────────────────────
 
 ENTRY_WINDOW_LEAD_DAYS = 3  # fire alert from D-3 through entry day (gives ~2 trading days
@@ -1953,16 +1926,6 @@ def main():
     # position "context" added a redundant pass without adding decision value.
     extreme_events: list[str] = []
 
-    # IF cohort screening — cohort names currently at 52w lows. Context only:
-    # 52w-low is NOT a validated IF entry signal (IF entry is gated by term-inversion,
-    # not 52w extremes). Kept as a watchlist, relabeled to not imply "confirmation".
-    if_candidates = detect_if_candidates_at_52w_lows()
-    if if_candidates:
-        print(f"\n  IF COHORT — names near 52w lows (context only; not an entry signal)")
-        print(f"  {'-'*68}")
-        for c in if_candidates:
-            print(f"  {c}")
-
     # PSYCH-GAP-LOG PROMPTS (SEP-live transition checklist item 1)
     # Surfaces open positions newly at 🟡/🔴 since last log entry so the
     # user is reminded to report a "would I close this in live?" judgment.
@@ -2031,7 +1994,7 @@ def main():
             and not pos_events
             and not assignment_events and not entry_window_events
             and not exdiv_events and not actionable_earnings
-            and not extreme_events and not if_candidates and not dte_events
+            and not extreme_events and not dte_events
             and not zebra_earnings_events and not regime_health_lines
             and not psych_gap_text and not construction_text):
         print(f"\n  ✓ All quiet — no alerts.")
