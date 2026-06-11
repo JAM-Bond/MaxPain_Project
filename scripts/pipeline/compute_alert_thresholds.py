@@ -1,8 +1,11 @@
 """Empirically calibrate per-name move thresholds for the daily alert.
 
-For each ticker in the v1.5 research cohort (+ any extra names with open
-positions), compute percentiles of daily absolute return from ORATS history.
-Store results in alert_thresholds table. Refresh quarterly or on cohort change.
+For every ticker in the live trading universe — all gate_config cohorts (bull_put,
+bear_call, inverted_fly, zebra tiers, earnings carve-outs, …), the v1.5 research
+cohort, SPY/QQQ/VIX, and any names with open positions — compute percentiles of
+daily absolute return from ORATS history. Store results in the alert_thresholds
+table. Names with no ORATS history are skipped and fall back to the alert's flat
+default (the alert labels those honestly). Refresh quarterly or on cohort change.
 
 Output table schema (alert_thresholds in maxpain.db):
   ticker, n_days, p75, p90, p95, p99, refreshed_at
@@ -31,6 +34,24 @@ from lib.db import DB_PATH  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("alert_thresh")
+
+
+def gate_config_symbols() -> set[str]:
+    """Union of every COHORT_* list in the qualifier's gate_config — the full live
+    trading universe across all structures. Future-proof: picks up any cohort added
+    later. Soft-fails to an empty set so calibration never breaks on an import error."""
+    try:
+        from scripts.qualifier import gate_config as gc
+    except Exception as e:  # noqa: BLE001
+        log.warning("gate_config import failed (%s); cohort universe limited to research set", e)
+        return set()
+    syms: set[str] = set()
+    for name in dir(gc):
+        if name.startswith("COHORT_"):
+            val = getattr(gc, name)
+            if isinstance(val, list):
+                syms.update(s for s in val if isinstance(s, str) and s)
+    return syms
 
 
 def compute_one(ticker: str) -> dict | None:
@@ -85,6 +106,13 @@ def main():
     cohort = pd.read_parquet(COHORT_PATH)["ticker"].tolist()
     # Always include SPY/VIX for regime context
     base = set(cohort + ["SPY", "QQQ", "VIX"])
+    # Add the full live trading universe — every COHORT_* list in gate_config — so
+    # all cohort names get calibrated thresholds, not just the v1.5 research set.
+    gc_syms = gate_config_symbols()
+    if gc_syms:
+        log.info("Adding %d gate_config cohort symbols (%d new vs research set)",
+                 len(gc_syms), len(gc_syms - base))
+        base |= gc_syms
     # Pull in any tickers with currently-open positions in either trade_log
     # or spread_score_trades (so the alert has thresholds for live paper book
     # even when those names aren't in the v1.5 cohort).
