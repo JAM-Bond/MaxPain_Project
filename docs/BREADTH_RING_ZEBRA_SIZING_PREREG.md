@@ -1,6 +1,6 @@
 # Breadth-Ring ZEBRA Sizing Gate — Pre-Registration
 
-**Status: DRAFT 2026-06-11 — NOT sealed. Awaiting user sign-off.**
+**Status: SEALED 2026-06-11 by user.** (Gate B tightened at seal: CVaR-10 reduction ≥8%, total-P&L within ±1%.)
 
 **Purpose:** Seal the rule by which the breadth ring would *bias the recommended size* of new ZEBRA entries — downsizing them by half on 🔴 (narrowing-while-extended) days — together with the evidence already established, the forward (paper) non-contradiction check, the promotion mechanics, and the negative-result plan. This is the zebra counterpart to the bull_put pre-reg ([[BREADTH_RING_SIZING_PREREG]]), which was **falsified** for bull_put; the signal lives in the long-delta debit structure instead.
 
@@ -50,7 +50,7 @@ Because 🔴 is rare (~16% of days) and zebra entries are infrequent (75-DTE, sm
 ## 6. Sealed decision rule (promotion to a live half-size recommendation requires ALL)
 
 - **Gate A — Backtest tail robustness (MET, §4).** §5 all-pass: 🔴 fatter tail + ~break-even mean, overlay-robust, drop-year-stable (incl. drop 2021+2023), walk-forward sign-stable, pooled-adequate. Re-affirmed at seal, not re-run.
-- **Gate B — Tail-reduction is material and ~free (MET, §4 Test 4).** Half-🔴 reduces cohort CVaR-10 by ≥ 5% (achieved +10.7%) with total cohort P&L change within ±3% (achieved +0.07%).
+- **Gate B — Tail-reduction is material and ~free (MET, §4 Test 4).** Half-🔴 reduces cohort CVaR-10 by **≥ 8%** (achieved +10.7%) with total cohort P&L change within **±1%** (achieved +0.07%). _(Thresholds tightened from the draft's ≥5% / ±3% at seal, 2026-06-11, to demand a materially meaningful tail cut at a genuinely near-free cost; the current evidence still clears the tighter bar, and any future re-run on a changed cohort/overlay must too.)_
 - **Gate C — Forward non-contradiction.** Through the paper window, tagged forward 🔴 zebra entries do not contradict the penalty. **Adequacy realism:** if forward 🔴 zebra N < 3 (likely), Gate C is treated as "not contradicted" by default and promotion rests on Gates A+B, with the forward tag continuing as a post-promotion monitor (§9). This is stated explicitly so thin forward N is not silently treated as confirmation.
 - **Gate D — Advisory integrity.** The rule only reduces size, stacks under existing caps, never blocks an otherwise-qualified entry, and touches no non-zebra structure. (Design property, verified at wiring.)
 
@@ -86,8 +86,8 @@ Promotion wiring (qualifier sizing hook + alert + revision log), only on promoti
 
 **Drafted by:** Claude Opus 4.8 (1M context)
 **Drafted on:** 2026-06-11
-**Sealed-by:** _pending_
-**Sealed-on:** _pending_
+**Sealed-by:** user
+**Sealed-on:** 2026-06-11
 
 ## 13. Cross-references
 
