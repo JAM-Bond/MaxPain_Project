@@ -106,6 +106,7 @@ EXPECTED_DAILY = [
     ("macro_refresh",            "Macro-sensitivity refresh",19, 30),
     ("auto_promotion_liquidity", "Auto-promotion liquidity", 22, 30),
     ("auto_promotion_nightly",   "Auto-promotion nightly",   22, 35),
+    ("stop_profile_ensure",      "Stop-profile cohort fill", 22, 40),
 ]
 # NOTE: agent_fomc (Wed/Thu 18:15 only) is intentionally NOT listed — the
 # weekday most_recent_occurrence logic would false-flag it on Mon/Tue/Fri.

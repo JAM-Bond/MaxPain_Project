@@ -60,12 +60,17 @@ WEEKDAY_JOBS = [
     ("macro_refresh",           19, 30, f"cd {ROOT} && bash scripts/macro/daily_refresh.sh"),
     ("auto_promotion_liquidity",22, 30, f"cd {ROOT} && {PY} -m scripts.maintenance.auto_promotion_liquidity_scan"),
     ("auto_promotion_nightly",  22, 35, f"cd {ROOT} && {PY} -m scripts.maintenance.auto_promotion_nightly"),
+    ("stop_profile_ensure",     22, 40, f"cd {ROOT} && {PY} -m lib.ticker_stop_profile --ensure-cohort"),  # fill stop profiles for newly-promoted cohort names
 ]
 
 # Quarterly: 5th of Jan/Apr/Jul/Oct at 06:00. (job_key, months, day, hour, minute, command)
 QUARTERLY_JOBS = [
     ("quarterly_refresh", [1, 4, 7, 10], 5, 6, 0,
      f"cd {ROOT} && {PY} -m scripts.maintenance.quarterly_cohort_refresh --apply"),
+    # Twice a year (Jan/Jul 6th, 06:30): full re-scan of every cohort name's breach-
+    # recovery / stop profile, to confirm behavior hasn't drifted materially.
+    ("stop_profile_refresh", [1, 7], 6, 6, 30,
+     f"cd {ROOT} && {PY} scripts/backtest/per_ticker_stop_study.py"),
 ]
 
 # Agent_Project-owned scrapers. They keep their com.agentproject.* labels (Agent

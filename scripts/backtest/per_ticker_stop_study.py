@@ -239,6 +239,17 @@ def main():
     prof = build_profile(df)
     prof.to_parquet(PROFILE, index=False)
     print(f"\nWrote {len(df)} cycles → {PER_CYCLE}\nWrote {len(prof)} profiles → {PROFILE}")
+    # Operational store: upsert into the DB so the alert + promotion are a lookup.
+    try:
+        import sqlite3
+        from lib.ticker_stop_profile import upsert_profiles
+        from lib.db import DB_PATH as _DBP
+        _c = sqlite3.connect(_DBP)
+        n = upsert_profiles(_c, prof)
+        _c.close()
+        print(f"Upserted {n} profiles → ticker_stop_profile (DB)")
+    except Exception as e:
+        print(f"DB upsert skipped ({e.__class__.__name__}: {e})")
 
     # summary
     for st in OPENERS:
