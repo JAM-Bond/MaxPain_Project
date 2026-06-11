@@ -132,9 +132,10 @@ def pending_prompts(
 def render_prompts_text(prompts: list[GapPrompt]) -> str:
     if not prompts:
         return ""
-    lines = ["", "  PSYCH-GAP-LOG PROMPTS", "  " + "-" * 68]
-    lines.append("  Open positions whose regime health turned 🟡/🔴 since the last log.")
-    lines.append("  Report any to Claude: \"[symbol] would_close=Y/N mtm=$X note: …\"")
+    lines = ["", "  PAPER-vs-LIVE GUT CHECK", "  " + "-" * 68]
+    lines.append("  These open positions just turned 🟡/🔴. On paper it's easy to hold —")
+    lines.append("  would you actually hold them with real money? Your honest answer now")
+    lines.append("  builds the record we check before going live.  (* = first time flagged)")
     # Compact: group by current status, one wrapped line each. Trailing * = a name
     # never logged before (vs a prior-logged status that has since worsened).
     def _fmt(ps: list) -> str:
@@ -148,4 +149,5 @@ def render_prompts_text(prompts: list[GapPrompt]) -> str:
         lines.append(f"  🔴 {_fmt(reds)}")
     if yels:
         lines.append(f"  🟡 {_fmt(yels)}")
+    lines.append("  Reply for any: \"[symbol] would_close=Y/N mtm=$X note: …\"")
     return "\n".join(lines)
