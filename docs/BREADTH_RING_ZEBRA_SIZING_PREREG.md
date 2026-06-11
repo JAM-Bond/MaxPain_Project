@@ -74,8 +74,8 @@ Wire 🔴 → half-size into the qualifier's sizing layer for `ZEBRA_STRUCTURES`
 
 ## 10. Build artifacts (post-seal)
 
-- Forward tag: date-join only (no schema change); a post-mortem query reporting 🔴-entry vs non-🔴 zebra tail by paper cycle.
-- On promotion: sizing hook in the qualifier for `ZEBRA_STRUCTURES` + alert annotation + revision-log entry.
+- **Forward tag (BUILT 2026-06-11):** `scripts/postmortem/breadth_zebra_forward_tag.py` — date-joins closed paper zebra cycles to entry-day `breadth_ring_daily` state and reports the 🔴 vs non-🔴 non-contradiction read (thin/empty handled as "not contradicted by default", never confirmation). Runs now during paper.
+- **Sizing hook (WIRED 2026-06-11, OFF):** `scripts/qualifier/cycle_qualifier.py` step 6 — on a 🔴 entry day it downgrades a zebra GO→DOWNSIZE (half), gated behind `gate_config.ZEBRA_BREADTH_HALFSIZE_ENABLED` (default **False**). The flag short-circuits first, so it is fully inert during the paper window (verified: OFF→GO full; ON+🔴→DOWNSIZE half; ON+non-🔴→GO full). It can only reduce size and only touches zebra. **Promotion = flip the flag ON** (post paper window + Gate C review) + add an alert annotation + a revision-log entry.
 - Re-run harness for Gate A/B on cohort/overlay changes: `scripts/backtest/breadth_ring_zebra_robustness.py`.
 
 ## 11. Effort estimate

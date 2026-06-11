@@ -215,6 +215,14 @@ SIZE_PAUSE = 0.0         # hard-pause trigger fires
 PAPER_SIZE_FACTOR = 0.5
 PAPER_SIZED_STRUCTURES = {"bull_put_mp"}  # remove after paper window closes
 
+# ZEBRA breadth-ring 🔴 tail-downsize gate — SEALED docs/BREADTH_RING_ZEBRA_SIZING_PREREG.md
+# (2026-06-11). On a 🔴 (narrowing+extended) breadth-ring day, new ZEBRA entries are
+# half-sized (tail-risk reduction; 🔴 zebras are ~break-even on mean with a fatter left
+# tail). KEPT OFF through the paper window: the pre-reg's anti-censoring design is
+# "tag-don't-downsize" during validation (the daily-alert card already annotates 🔴 zebra
+# entries descriptively). Flip ON at promotion, AFTER the paper window + Gate C review.
+ZEBRA_BREADTH_HALFSIZE_ENABLED = False
+
 
 # ─── Budget caps (capital-outlay structures only) ─────────────────────
 #

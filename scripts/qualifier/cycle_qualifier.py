@@ -119,6 +119,28 @@ def bull_put_ma_pct(symbol: str) -> float | None:
     return (spot - ma) / ma
 
 
+@functools.lru_cache(maxsize=1)
+def _breadth_red_today() -> bool:
+    """Latest breadth-ring 🔴 (narrowing + extended) state, for the sealed ZEBRA
+    sizing gate (docs/BREADTH_RING_ZEBRA_SIZING_PREREG.md). Reads the most recent
+    breadth_ring_daily row written by the 16:30 refresh cron (a ~1-day lag at the
+    9:25 qualifier run, which the slow signal tolerates). Cached once per run.
+    Fail-open to False (no downsize) if unavailable. Only ever called when the
+    gate flag is ON — inert during the paper window."""
+    try:
+        import sqlite3
+        from lib.db import DB_PATH
+        from lib.breadth_ring import latest_persisted_ring
+        conn = sqlite3.connect(DB_PATH)
+        try:
+            ring = latest_persisted_ring(conn)
+        finally:
+            conn.close()
+        return bool(ring and ring.get("top_warning"))
+    except Exception:
+        return False
+
+
 # ─── Live spot lookup for budget-cap gate ─────────────────────────────
 
 def fetch_schwab_spots(symbols: list[str]) -> dict[str, float]:
@@ -421,6 +443,25 @@ def evaluate_opex_cell(symbol: str, structure: str, window_label: str,
             else:
                 # Already DOWNSIZE (soft-downsize); keep size, annotate
                 row["reason"] = f"{row['reason']}; also {ma_note}"
+
+    # 6. ZEBRA breadth-ring 🔴 tail-downsize gate (SEALED pre-reg
+    # docs/BREADTH_RING_ZEBRA_SIZING_PREREG.md). 🔴 (narrowing+extended) zebra
+    # entries carry a fatter left tail at ~break-even mean; half-size sheds tail
+    # at ~zero cost (§5: CVaR-10 −10.7% for +0.07% total P&L). OFF during the
+    # paper window (G.ZEBRA_BREADTH_HALFSIZE_ENABLED=False) — anti-censoring
+    # tag-don't-downsize; the alert card already annotates 🔴 zebra entries.
+    # The flag short-circuits first, so this is fully inert until promotion.
+    if (G.ZEBRA_BREADTH_HALFSIZE_ENABLED
+            and row["verdict"] in (G.VERDICT_GO, G.VERDICT_DOWNSIZE)
+            and structure.startswith("zebra")
+            and _breadth_red_today()):
+        b_note = "breadth 🔴 (narrowing+extended) — tail-risk half-size [zebra sizing pre-reg]"
+        if row["verdict"] == G.VERDICT_GO:
+            row["verdict"] = G.VERDICT_DOWNSIZE
+            row["size"] = G.SIZE_DOWNSIZE
+            row["reason"] = f"DOWNSIZE: {b_note} [orig: {row['reason']}]"
+        else:
+            row["reason"] = f"{row['reason']}; also {b_note}"
     return row
 
 
