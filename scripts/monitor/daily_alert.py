@@ -1762,6 +1762,26 @@ def main():
     except Exception as e:
         print(f"\n  BREADTH RING — unavailable ({e.__class__.__name__}: {e})")
 
+    # ── OVERNIGHT-DRIFT WATCH — intraday-vs-overnight decomposition for QQQ/SOXX/SPY
+    #    (DESCRIPTIVE; see project_market_view_20260611). Flags overnight "levitation"
+    #    (gains concentrated in the gap = complacency/late-cycle tell) and its breakdown
+    #    (overnight bid failing while intraday selling deepens — the 6/10 tell). The
+    #    refresh_breadth_ring cron (~16:30) computes + persists it; here we READ that row
+    #    (no network, no DB write) and fall back to a live compute only if it's missing.
+    #    NOT a gate and NOT a cascade vote — pairs with the BREADTH RING above. Soft-fail. ──
+    try:
+        from lib.overnight_drift import (
+            latest_persisted as _latest_drift, compute_overnight_drift,
+            render_text as _drift_text2)
+        _drift_o = _latest_drift(conn) or compute_overnight_drift()
+        _drift_o_lines = _drift_text2(_drift_o)
+        if _drift_o_lines:
+            print()
+            for _l in _drift_o_lines:
+                print(f"  {_l}")
+    except Exception as e:
+        print(f"\n  OVERNIGHT-DRIFT WATCH — unavailable ({e.__class__.__name__}: {e})")
+
     # ── SECTOR DRIFT WATCH — strict, descriptive early read on candidate-slate
     #    sector concentration (rotation context to help pick candidates; NOT a
     #    gate). Returns "" on a quiet day. Soft-fail: never break the alert. ──

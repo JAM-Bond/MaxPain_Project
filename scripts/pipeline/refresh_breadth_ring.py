@@ -8,8 +8,12 @@ Two jobs, each soft-failing independently so a feed hiccup never blocks the othe
      left untouched. The breadth ring's top-warning leg reads this when fresh.
   2. Compute the RSP/SPY relative-strength ring and persist it to
      breadth_ring_daily, so the daily alert can render it without a network call.
+  3. Compute the overnight-drift watch (intraday-vs-overnight decomposition for
+     QQQ/SOXX/SPY) and persist it to overnight_drift_daily — same read-without-
+     network contract in the alert.
 
-Descriptive only — see lib/breadth_ring (not a gate, not a cascade vote).
+Descriptive only — see lib/breadth_ring / lib/overnight_drift (not a gate, not a
+cascade vote).
 """
 from __future__ import annotations
 
@@ -78,12 +82,29 @@ def refresh_ring() -> str:
     return "ring: " + " | ".join(render_text(ring))
 
 
+def refresh_overnight_drift() -> str:
+    """Compute + persist the overnight-drift watch. Returns a status line."""
+    import sqlite3
+    from lib.overnight_drift import compute_overnight_drift, persist as od_persist
+    drift = compute_overnight_drift()
+    if drift.get("error"):
+        return f"overnight-drift: FAILED ({drift['error']})"
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        od_persist(drift, conn)
+    finally:
+        conn.close()
+    syms = " ".join(f"{s}:{d['status']}" for s, d in drift["symbols"].items())
+    return f"overnight-drift: OK {drift['asof']} {drift['status']} [{syms}]"
+
+
 def main() -> int:
     print(f"[refresh_breadth_ring] {date.today().isoformat()}")
     print("  " + refresh_breadth_live())
     # ring compute reads the freshly-written breadth_live for its top-warning leg
     for line in refresh_ring().split("\n"):
         print("  " + line)
+    print("  " + refresh_overnight_drift())
     return 0
 
 
