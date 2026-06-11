@@ -1392,6 +1392,16 @@ def build_construction_enrichment(conn, close_candidate_symbols=None) -> tuple[s
     # candidate cards. Avoids re-querying regime_state per symbol.
     overlay_rule = None
 
+    # Breadth-ring annotation (step B): co-locate the RSP/SPY narrowing warning on
+    # long-delta cards (bull_put / zebra). Read once; descriptive, never gates size.
+    from lib.breadth_ring import (
+        latest_persisted_ring as _latest_ring, card_annotation as _breadth_annot,
+        LONG_DELTA_STRUCTURES as _LONG_DELTA)
+    try:
+        _ring_for_cards = _latest_ring(conn)
+    except Exception:
+        _ring_for_cards = None
+
     # Track (opex, sector) → count of candidates rendered so we can flag
     # the 2nd entry in a sector with ⚠ SECTOR-LOAD. The qualifier already
     # caps the 3rd+ (SKIP_CONCENTRATION verdict not present in this query);
@@ -1440,6 +1450,10 @@ def build_construction_enrichment(conn, close_candidate_symbols=None) -> tuple[s
                 f"(rank {r['ev_rank_position']} in {r['structure']} {r['verdict']} by reward/risk)")
         if sector_warning:
             text_parts.append(sector_warning)
+        # Breadth-ring note (step B): long-delta entries only, narrowing days only.
+        _bnote = _breadth_annot(_ring_for_cards) if str(r["structure"]).lower() in _LONG_DELTA else None
+        if _bnote:
+            text_parts.append(_bnote["text"])
         # Close/open reconciliation: this is a NEW bullish entry rec, but if the
         # same name is ALSO a regime-🔴 close candidate today (an open position
         # underwater in a stressed regime), opening fresh long-delta fights the
@@ -1468,6 +1482,8 @@ def build_construction_enrichment(conn, close_candidate_symbols=None) -> tuple[s
                 f"padding:6px 10px;background:#fff8dc;border-left:3px solid #b58900'>"
                 f"{sector_warning.strip()}</div>"
             )
+        if _bnote:
+            html_parts.append(_bnote["html"])
         if conflict_note:
             html_parts.append(
                 f"<div style='font-size:12px;color:#a00;margin:4px 0 12px 0;"

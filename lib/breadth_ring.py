@@ -194,6 +194,42 @@ def latest_persisted_ring(conn, max_stale_days: int = 4) -> Optional[dict]:
     }
 
 
+# Long-delta structures whose P&L is hurt by a broad-market drawdown — the
+# entries the breadth warning is relevant to (bull puts profit if price holds up;
+# zebras are synthetic long stock). Bear calls / inverted flies are NOT long-delta.
+LONG_DELTA_STRUCTURES = {"bull_put", "bull_put_mp", "zebra", "zebra_protected"}
+
+
+def card_annotation(ring: Optional[dict]) -> Optional[dict]:
+    """One-line breadth note to co-locate on a long-delta construction card.
+    Returns {'text', 'html'} when the ring is narrowing (🟡/🔴), else None — a
+    broadening/green ring is reassuring and doesn't need to clutter the card.
+
+    DESCRIPTIVE: it explains what the signal shows in relation to SPY and flags
+    elevated drawdown risk; it does NOT change the recommended size (that is the
+    pre-registered step D — see docs/BREADTH_RING_SIZING_PREREG.md)."""
+    if not ring or ring.get("error") or ring.get("broadening", True):
+        return None
+    rs_pct = ring.get("rs", 0.0) * 100
+    run = ring.get("run_days", 0)
+    base = (f"equal-weight S&P (RSP) is lagging cap-weight (SPY) by {abs(rs_pct):.2f}% "
+            f"vs its 50-day trend ({run}d) — fewer names are carrying the index, so the "
+            f"broad-market drawdown risk behind this long-delta entry is above normal")
+    if ring.get("top_warning"):
+        text = (f"  ⚠ BREADTH 🔴 narrowing + extended: {base}; this is the narrow-megacap-top "
+                f"signature (~3× the >10% drawdown odds historically). Consider downsizing this "
+                f"entry. (Descriptive — sizing not yet gated; see BREADTH_RING_SIZING_PREREG.)")
+        color, bg = "#a00", "#fdecea"
+    else:
+        text = (f"  ⚠ BREADTH 🟡 narrowing: {base}. (Descriptive — sizing not yet gated; "
+                f"see BREADTH_RING_SIZING_PREREG.)")
+        color, bg = "#b58900", "#fff8dc"
+    html = (f"<div style='font-size:12px;color:{color};margin:4px 0 12px 0;"
+            f"padding:6px 10px;background:{bg};border-left:3px solid {color}'>"
+            f"{text.strip()}</div>")
+    return {"text": text, "html": html}
+
+
 def persist(ring: dict, conn) -> None:
     """Append today's ring to breadth_ring_daily (history substrate). Soft-fail."""
     if ring.get("error"):
