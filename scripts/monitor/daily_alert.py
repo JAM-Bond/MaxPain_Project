@@ -893,11 +893,17 @@ def detect_position_events(positions: pd.DataFrame, thresholds: dict, conn) -> l
 
         if big_move and sym not in seen_moves:
             seen_moves.add(sym)
-            direction = "↑" if ret > 0 else "↓"
-            events.append(
-                f"{sym}: BIG MOVE {direction} {ret*100:+.2f}% "
-                f"(p95 threshold {thr*100:.2f}%, now ${today_px:.2f})"
-            )
+            direction = "up" if ret > 0 else "down"
+            head = f"{sym} BIG MOVE {direction} {abs(ret)*100:.2f}% (now ${today_px:.2f})."
+            if sym in thresholds:   # calibrated: thr is this name's empirical 95th-percentile daily move
+                events.append(
+                    f"{head} Approximately 95% of trading days {sym} moves less than {thr*100:.2f}%."
+                )
+            else:                   # no calibrated history → generic fallback threshold
+                events.append(
+                    f"{head} Exceeds the default {thr*100:.2f}% move threshold "
+                    f"({sym} has no calibrated history yet)."
+                )
 
         # Spread-specific checks (skip stock-only trades)
         struct = (p.get("structure") or "").lower()
