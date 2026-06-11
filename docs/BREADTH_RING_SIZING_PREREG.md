@@ -1,6 +1,6 @@
 # Breadth-Ring Sizing Gate — Pre-Registration
 
-**Status: SEALED 2026-06-11 by user.**
+**Status: SEALED 2026-06-11 by user. RESULT 2026-06-11: bull_put gate FALSIFIED (Gate A+C fail) → not built; step B descriptive stays. Zebra shows a strong directional signal → separate pre-reg warranted. See §14.**
 
 **Purpose:** Define, before any promotion, the exact rule by which the breadth ring would *bias the recommended size* of new long-delta credit-vertical entries — specifically, downsizing them on 🔴 (narrowing-while-extended) days — and the sealed evidence gates that rule must clear before it influences any recommendation.
 
@@ -83,6 +83,37 @@ Backtest corroboration + counterfactual: ~2–3 hours (data already on disk). Pr
 **Drafted on:** 2026-06-11
 **Sealed-by:** user
 **Sealed-on:** 2026-06-11
+
+## 14. Result — corroboration run 2026-06-11
+
+Script `scripts/backtest/breadth_ring_sizing_corroboration.py`; tagged cycles at
+`data/profile/breadth_ring_sizing_corroboration.parquet`. Every cycle tagged by its
+entry-day ring state (merge_asof on `breadth_ring_daily.asof`).
+
+**BULL_PUT (primary, N=14,091 full-universe, managed exit) — gate FALSIFIED:**
+- **Gate A FAIL.** 🔴-entry mean P&L −0.062 vs non-🔴 −0.052 (Δ −0.010; sealed need ≤ −0.10);
+  loss-cap-hit 9.7% vs 9.5% (Δ +0.3pts; need ≥ +5). 🔴 bull_puts do not materially underperform.
+- **Gate C FAIL.** Train split even shows 🔴 marginally *better* on loss-cap-hit (−0.6pts) — signs
+  don't align across splits.
+- Gate B PASS mechanically (half-sizing 🔴 trims dollar-downside 6.4%, total P&L +7.7%) but moot once A fails.
+- **Reading:** a defined-risk, managed bull_put absorbs the 🔴 drawdown risk via its structure +
+  50%/21-DTE exits; the index-level drawdown signal does not translate into materially worse per-cycle
+  credit-spread P&L. This is a clean, sensible negative.
+
+**DECISION (per §5 all-gates + §8 negative-result plan):** the bull_put sizing gate is **NOT built.**
+Step B (descriptive card annotation) remains the shipped, no-harm state.
+
+**ZEBRA (secondary directional check, N=2,405 tier1+tier2 overlay combined-hold) — strong signal:**
+🔴-entry mean P&L **−0.82 vs +10.67 non-🔴 (Δ −11.5/cycle)**; worst-decile −35.8 vs −24.7. 🔴-entry
+zebras were dramatically worse — consistent with the economics (zebra = synthetic long stock, real
+directional exposure that a narrow-megacap-top regime punishes, unlike a defined-risk spread).
+**NOT promoted off this** — secondary check (🔴 N=376, debit structure, not the sealed bull_put
+metrics). It motivates a **separate zebra-specific pre-reg** (zebra-appropriate tail metric, walk-forward,
+adequacy) — the next thing to specify if pursued.
+
+**Net:** the signal's downside-risk content is real but shows up in the structure that carries the
+directional exposure (zebra), not the defined-risk bull_put the gate was anchored on. The ring stays
+descriptive everywhere; a zebra gate is the live follow-up question.
 
 ## 13. Cross-references
 
