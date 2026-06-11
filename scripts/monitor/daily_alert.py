@@ -1454,6 +1454,12 @@ def build_construction_enrichment(conn, close_candidate_symbols=None) -> tuple[s
         _bnote = _breadth_annot(_ring_for_cards) if str(r["structure"]).lower() in _LONG_DELTA else None
         if _bnote:
             text_parts.append(_bnote["text"])
+        # Per-ticker breach-recovery / stop note (credit verticals): descriptive —
+        # mean-revert (hold + days-to-recover) vs robust non-revert (set a stop at d%).
+        from lib.ticker_stop_profile import card_note as _stop_note
+        _snote = _stop_note(r["symbol"], str(r["structure"]))
+        if _snote:
+            text_parts.append(_snote["text"])
         # Close/open reconciliation: this is a NEW bullish entry rec, but if the
         # same name is ALSO a regime-🔴 close candidate today (an open position
         # underwater in a stressed regime), opening fresh long-delta fights the
@@ -1484,6 +1490,8 @@ def build_construction_enrichment(conn, close_candidate_symbols=None) -> tuple[s
             )
         if _bnote:
             html_parts.append(_bnote["html"])
+        if _snote:
+            html_parts.append(_snote["html"])
         if conflict_note:
             html_parts.append(
                 f"<div style='font-size:12px;color:#a00;margin:4px 0 12px 0;"
