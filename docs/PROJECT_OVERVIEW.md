@@ -435,6 +435,85 @@ changes is only the trader's decision to act on its advice with real capital.
 
 ---
 
+## Appendix — Glossary
+
+This document aims to be self-contained, but it uses the working vocabulary of options
+trading and of the project itself. The terms below are grouped by kind. Where a term is
+also defined in the body, the glossary entry is the short reference version.
+
+**The project's name**
+
+- **Max pain / MaxPain** — In options, the *max-pain* price is the strike level at which the largest dollar amount of open contracts would expire worthless — i.e., the price that inflicts the maximum aggregate loss on option *buyers*. The project began as an investigation of trading around that level and kept the name, but the max-pain thesis itself has since been tabled; the system today is a credit-spread and long-volatility playbook, and the name is historical rather than descriptive.
+
+**The four trading structures**
+
+- **Credit spread** — An options position opened for a net *credit* (you are paid premium): sell one option and simultaneously buy a further out-of-the-money option of the same type as protection. Maximum profit is the credit collected; maximum loss is the distance between the two strikes minus that credit. Defined-risk by construction.
+- **Bull put** — A put credit spread: sell a put and buy a lower-strike put beneath it. Collects a credit and keeps it if the underlying stays above the short strike. A neutral-to-bullish position.
+- **Bear call** — A call credit spread: sell a call and buy a higher-strike call above it. Keeps its credit if the underlying stays below the short strike. A neutral-to-bearish position; in this system it only deploys in confirmed weak, high-volatility regimes.
+- **Inverted fly** — A defined-risk, three-strike butterfly-type structure configured "inverted" so that it profits from a *large* move in the underlying or an expansion in implied volatility — the long-volatility opposite of a premium-selling butterfly. Its key parameter is *wing width* (see below).
+- **ZEBRA (Zero-Extrinsic Back-Ratio)** — A structure built to behave like 100 shares of stock with capped risk: it carries roughly +1.00 delta (moves nearly dollar-for-dollar with the underlying) but with almost no time-decay exposure and a maximum loss bounded at the debit paid to open it. In this system each ZEBRA is paired with a protective long put (the "overlay").
+
+**Options mechanics**
+
+- **Strike / short strike** — The price at which an option may be exercised. The *short* strike is the leg you sold; it is the side that is at risk if the underlying moves against you.
+- **Spot** — The current trading price of the underlying stock or ETF.
+- **Premium / credit / debit** — *Premium* is an option's price. Opening a position for a *credit* means you are paid net premium; for a *debit* means you pay net premium.
+- **Moneyness** — The strike's position relative to spot: *in-the-money* (ITM), *at-the-money* (ATM), or *out-of-the-money* (OTM). See section 4.
+- **Delta** — How much an option's price moves for a $1 move in the underlying, also read loosely as the option's probability of finishing in-the-money. A 0.30-delta short strike is moderately out-of-the-money (~30%); 0.50 is at-the-money; 0.70 is in-the-money.
+- **Theta** — Time decay: how much value an option loses per day as expiration approaches. Working in the credit-spread seller's favor.
+- **Gamma** — The rate at which delta itself changes as the underlying moves. Gamma spikes in the final weeks before expiration, which is why a short premium position grows riskier near expiry — the basis for the twenty-one-day management cue.
+- **Implied volatility (IV)** — The amount of future price movement the market is pricing into an option. Higher IV means richer premiums.
+- **IV rank (IVR)** — Where current IV sits within its own trailing range (here, the prior 252 trading days ≈ one year), scaled 0 to 1. An IVR above 0.5 means volatility is in the upper half of its yearly range — "elevated."
+- **Term structure / inversion** — The curve of implied volatility across expiration dates. It is normally upward-sloping (longer-dated IV higher, called *contango*); it is *inverted* when near-term IV exceeds longer-dated IV — a stress or event signal that historically rewards long-volatility structures.
+- **Wing / wing width** — In butterfly-type structures, the distance from the central body to the outer protective strikes. It sets the structure's width, cost, and payoff profile; in this system it is tuned per ticker for inverted flies.
+- **Long volatility (long-vol)** — A position that gains when volatility or the size of price moves increases — the opposite stance to selling premium.
+- **Mark / mark-to-market** — Valuing an open position at its current market price, as opposed to its entry price.
+- **Bid / mid / ask** — The best price a buyer will pay (bid), the best a seller will accept (ask), and the midpoint between them (mid).
+- **Buy-to-close / stop-limit / good-til-canceled (GTC)** — Order types. *Buy-to-close* exits a short option. A *stop-limit* triggers when the mark reaches a set level and then fills at a specified limit price. *Good-til-canceled* keeps an order working until it fills or is cancelled.
+- **Roll / rolling** — Closing a position that is expiring or under threat and reopening a similar one at a later expiration or different strikes.
+- **OpEx** — Options expiration — the monthly expiration date (standard third-Friday cycle) around which the system's trade cycles are organized. Used interchangeably with "options-expiration cycle."
+- **DTE / T-minus notation** — Days to expiration. "T-21," "T-14," etc. denote a number of days before expiration (T-21 = twenty-one days remaining).
+- **Defined-risk** — A position whose worst-case loss is fixed and known at entry. The system trades nothing else (see section 5).
+- **Friction / slippage** — The real cost of trading beyond the quoted price: the bid/ask spread, fees, and *slippage* — the gap between the price you expect and the price you actually get filled at.
+- **Tail risk** — The risk of rare but large adverse moves in the tails of the return distribution.
+
+**Statistical and research-method terms**
+
+- **Pre-registration** — Committing in writing to a hypothesis and its exact pass/fail criteria *before* running the test, so a result cannot be rationalized after the fact. The system's central research discipline.
+- **Walk-forward validation** — Building or fitting a rule on an earlier *training* window of history, then confirming it on a later, untouched *validation* window. A rule must hold in both, with the same direction, to be trusted — the guard against curve-fitting.
+- **Out-of-sample** — Data not used to build a rule, reserved to test it honestly. Forward paper-trading is out-of-sample by construction.
+- **Wilcoxon signed-rank test** — A paired, non-parametric statistical test (it makes no assumption that the data are normally distributed) used to compare a candidate's per-cycle results against an alternative.
+- **Expectancy** — The average profit or loss per trade expected over many repetitions.
+- **Falsification criteria** — Pre-set conditions that, if met, declare a rule or structure to have failed, forcing a rewrite rather than a quiet extension of testing.
+- **Regime** — The prevailing market environment — calm bull, confirmed bear, recovery, and so on — that conditions which rules apply and at what size. See the regime stages below.
+- **Coefficient (sensitivity coefficient)** — In the macro-sensitivity profile (section 6), a number measuring how strongly a name has historically moved in response to a given economic factor.
+
+**System-specific terms**
+
+- **Cohort** — The validated list of tickers eligible to trade a given structure. Membership is earned through the selection pipeline (section 2).
+- **Tier 1 / Tier 2** — Within a cohort, the original validated core (tier 1) versus the later auto-promotion expansion (tier 2). Both trade identically; see section 2.
+- **Cycle qualifier (the qualifier)** — The weekday-morning job that issues a verdict for every cohort name.
+- **Verdict (go / downsize / skip / pending)** — The qualifier's per-name decision: full size, half size, skip this cycle, or defer pending more data.
+- **Construction block / construction card** — The daily alert's per-trade recipe: structure, strikes, per-leg prices, and a limit credit or debit to work. A recommendation to enter by hand, never an order the system places.
+- **Rings / the cascade** — The three-ring regime-health monitor (AI-concentration, technology-index, broad-market) whose simultaneous red flags raise the informational *exit cascade*. Distinct from the descriptive *breadth ring* and *overnight-drift watch* (section 3).
+- **H1** — The bear-confirmation signal underlying the regime stages: SPY trading below its 200-day moving average *and* SPY IV rank above 0.5. High-precision as confirmation, weak as early warning.
+- **Held-to-expiration counterfactual** — The post-mortem's discipline scoreboard: what a cycle's profit *would* have been had every spread simply been held to expiration, compared against what was actually realized (sections 5 and 11).
+- **Post-mortem** — The after-cycle review that reads the cycle's artifacts through a sealed reasoning framework to ask whether the framework was executed consistently.
+- **The book** — The set of currently open positions.
+- **Harness** — The software framework — scheduled jobs, alert, dashboard, database — that runs the whole system.
+
+**The five regime stages**
+
+The regime-transition framework classifies the market into five stages that govern new-entry mix and sizing (it never force-closes existing positions). The live system computes Stages 1–3 directly from the daily signal; Stages 4 and 5 are the conceptual deepening and recovery phases of a confirmed bear.
+
+- **Stage 1 — Soft-downsize.** Early-warning triggers fire (elevated IV rank, price near a falling 200-day average, or an inverted term structure with a high VIX). New bull puts cut to half size; new ZEBRAs paused.
+- **Stage 2 — Below trend, unconfirmed.** SPY breaks below its 200-day moving average but IV rank is still under 0.5. Continued caution; bear calls still not permitted.
+- **Stage 3 — Confirmed bear (H1 active).** SPY below its 200-day average *and* IV rank above 0.5. Bear calls become permitted on their cohort; long-volatility structures continue.
+- **Stage 4 — Decline toward the trough.** The drawdown plays out; rollable bull puts manage via their roll triggers, others absorb defined-risk losses, and ZEBRA exposure ages toward its capped maximum loss.
+- **Stage 5 — Recovery (H1 false-positive zone).** New bear calls stop once SPY closes back above its 200-day average; bull puts and ZEBRAs stay in their downsized cadence until both the price and volatility conditions fully clear.
+
+---
+
 *Part I is roughly 2,900 words; Part II adds the operating guide. Together the document is
 both an explanation of how the system works and a guide to running it. The canonical,
 version-controlled mechanics remain in `TRADING_PLAN.rtf`.*
