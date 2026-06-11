@@ -98,11 +98,11 @@ def write_table(rows: list[dict]) -> None:
     conn.close()
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--ticker", nargs="+", help="Subset of cohort to recompute")
-    args = parser.parse_args()
-
+def recalibrate(only: list[str] | None = None) -> list[dict]:
+    """Compute + persist move thresholds for the full universe (v1.5 research
+    cohort + every gate_config cohort + SPY/QQQ/VIX + open positions). Returns the
+    rows written. `only` restricts to a subset. No printing — safe to call from
+    other pipelines (e.g. the nightly auto-promotion hook)."""
     cohort = pd.read_parquet(COHORT_PATH)["ticker"].tolist()
     # Always include SPY/VIX for regime context
     base = set(cohort + ["SPY", "QQQ", "VIX"])
@@ -114,25 +114,25 @@ def main():
                  len(gc_syms), len(gc_syms - base))
         base |= gc_syms
     # Pull in any tickers with currently-open positions in either trade_log
-    # or spread_score_trades (so the alert has thresholds for live paper book
-    # even when those names aren't in the v1.5 cohort).
+    # or spread_score_trades (so the alert has thresholds for the live paper book
+    # even when those names aren't in any cohort).
     conn = sqlite3.connect(DB_PATH)
     open_syms = set()
     for tbl, where in [("trade_log", "exit_date IS NULL OR exit_price IS NULL"),
                         ("spread_score_trades", "exit_date IS NULL")]:
         try:
-            rows = conn.execute(f"SELECT DISTINCT symbol FROM {tbl} WHERE {where}").fetchall()
-            open_syms.update(r[0] for r in rows if r[0])
+            rows_ = conn.execute(f"SELECT DISTINCT symbol FROM {tbl} WHERE {where}").fetchall()
+            open_syms.update(r[0] for r in rows_ if r[0])
         except Exception:
             pass
     conn.close()
-    if open_syms:
+    if open_syms - base:
         log.info("Adding %d open-position symbols outside cohort: %s",
                  len(open_syms - base), sorted(open_syms - base))
-        base |= open_syms
+    base |= open_syms
     targets = sorted(base)
-    if args.ticker:
-        targets = [t for t in targets if t in args.ticker]
+    if only:
+        targets = [t for t in targets if t in set(only)]
 
     log.info("Calibrating thresholds for %d tickers", len(targets))
     rows = []
@@ -142,13 +142,22 @@ def main():
             log.warning("  %s: insufficient history, skip", t)
             continue
         rows.append(result)
-
     if not rows:
         log.error("No tickers calibrated")
-        return
-
+        return []
     write_table(rows)
     log.info("Wrote %d rows to alert_thresholds", len(rows))
+    return rows
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--ticker", nargs="+", help="Subset of cohort to recompute")
+    args = parser.parse_args()
+
+    rows = recalibrate(only=args.ticker)
+    if not rows:
+        return
 
     # Display summary
     df = pd.DataFrame(rows).sort_values("p95", ascending=False)

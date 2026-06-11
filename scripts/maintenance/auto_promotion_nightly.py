@@ -496,6 +496,42 @@ def _refresh_macro_profile(promoted_tickers: list[str]) -> tuple[bool, str]:
                   f"now carry regime_primary: {profiled}")
 
 
+def _refresh_move_thresholds() -> tuple[bool, str]:
+    """Recalibrate the daily-alert per-name move thresholds (alert_thresholds) so
+    tonight's newly-promoted cohort names get an empirical 95th-percentile move
+    band before tomorrow's alert, instead of falling back to the flat default.
+
+    Run as a subprocess (like the macro refresh) so it reads the freshly-written
+    gate_config.py rather than this process's stale cached import. Never raises —
+    a calibration failure must not fail the nightly; uncalibrated names simply use
+    the alert's labeled default until the next run.
+
+    Returns (ok, note) for the email summary.
+    """
+    log.info("Recalibrating alert move-thresholds for the full cohort universe")
+    t = time.time()
+    try:
+        proc = subprocess.run(
+            ["/opt/homebrew/bin/python3.11", "-m", "scripts.pipeline.compute_alert_thresholds"],
+            cwd=str(ROOT), capture_output=True, text=True, timeout=300,
+        )
+    except Exception as e:  # noqa: BLE001
+        log.warning("Move-threshold recalibration subprocess error: %s", e)
+        return False, f"move-threshold recalibration FAILED to launch: {e}"
+    el = time.time() - t
+    if proc.returncode != 0:
+        tail = "\n".join((proc.stderr or proc.stdout or "").splitlines()[-6:])
+        log.warning("Move-threshold recalibration exited %d in %.1fs:\n%s",
+                    proc.returncode, el, tail)
+        return False, (f"move-threshold recalibration FAILED (exit {proc.returncode}); "
+                       f"new names use the labeled default until next run.")
+    import re
+    m = re.search(r"Wrote (\d+) rows", (proc.stdout or "") + (proc.stderr or ""))
+    n = m.group(1) if m else "?"
+    log.info("Move-threshold recalibration OK in %.1fs (%s names)", el, n)
+    return True, f"move-threshold recalibration OK ({el:.0f}s, {n} names calibrated)"
+
+
 def _run(args, run_date: date, snapshot_date: date | None, t0: float) -> int:
     # ── Find snapshot ──
     snap_path = _find_snapshot(snapshot_date)
@@ -647,6 +683,7 @@ def _run(args, run_date: date, snapshot_date: date | None, t0: float) -> int:
 
     # ── Stage 5c: audit log + ledger ──
     macro_note = ""
+    thresh_note = ""
     changes_path = (AUTO_PROMOTION_DIR /
                     f"changes_{run_date.isoformat()}.parquet")
     if not args.dry_run:
@@ -694,6 +731,13 @@ def _run(args, run_date: date, snapshot_date: date | None, t0: float) -> int:
             macro_note = ("Macro refresh skipped — promotions were NOT applied "
                           "(safety halt); cohort union unchanged.")
 
+        # ── Stage 5e: recalibrate alert move-thresholds for newly-promoted names ──
+        # Same gate as the macro refresh: only when gate_config was actually edited
+        # and at least one name was promoted, so the new names get an empirical move
+        # band before tomorrow's alert instead of the flat default.
+        if applied_flag and n_prom > 0:
+            _, thresh_note = _refresh_move_thresholds()
+
     # ── Email summary ──
     runtime_min = (time.time() - t0) / 60.0
     text_body, html_body = _build_email_body(
@@ -710,7 +754,8 @@ def _run(args, run_date: date, snapshot_date: date | None, t0: float) -> int:
                     f"no parquet audit log."
                     if args.dry_run else
                     (f"Audit log: {changes_path}"
-                     + (f"\n{macro_note}" if macro_note else ""))),
+                     + (f"\n{macro_note}" if macro_note else "")
+                     + (f"\n{thresh_note}" if thresh_note else ""))),
     )
     if not safety_ok:
         subject = _make_subject(run_date, n_prom, n_dem, len(decisions),
