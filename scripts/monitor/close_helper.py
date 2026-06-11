@@ -349,6 +349,30 @@ def _today_position_status(conn: sqlite3.Connection,
     return {int(r[0]): (r[1] or "") for r in rows}
 
 
+def _stop_profile_for(ticker: str, structure: str):
+    """Robustness-gated per-ticker breach/stop profile. Soft import so the close
+    helper still works if the profile table/parquet is unavailable."""
+    try:
+        from lib.ticker_stop_profile import lookup
+        return lookup(ticker, structure)
+    except Exception:
+        return None
+
+
+def _breach_depth(r) -> Optional[float]:
+    """How far spot has breached the short strike, as a fraction (≥0 = breached,
+    None if not a credit vertical / missing data). Direction-aware."""
+    sk, spot = r.short_strike, r.spot
+    if sk is None or spot is None or sk <= 0:
+        return None
+    st = (r.spread_type or "").lower()
+    if "bull_put" in st:        # short put — adverse move is DOWN through the strike
+        return max(0.0, (sk - spot) / sk)
+    if "bear_call" in st:       # short call — adverse move is UP through the strike
+        return max(0.0, (spot - sk) / sk)
+    return None
+
+
 def build_close_candidates_rollup(
     rows: list[CloseRow],
     conn: sqlite3.Connection,
@@ -367,7 +391,6 @@ def build_close_candidates_rollup(
     Multiple cues stack visually. Returns {text, html} — both empty if no
     candidates today.
     """
-    statuses = _today_position_status(conn, today_iso)
     candidates = []
     for r in rows:
         dte = _dte_for(r.opex_date)
@@ -376,10 +399,16 @@ def build_close_candidates_rollup(
             cues.append(("💰", "50%+ profit"))
         if dte is not None and dte <= 21:
             cues.append(("⏰", f"T-21 hit (DTE {dte})"))
-        if statuses.get(r.id) == "🔴" and r.capture_at_mid < 0:
-            # 'why': concrete observation (strike cushion/breach) + regime, not just
-            # "underwater". cap% is already its own column, so it's not repeated here.
-            cues.append(("🔴", f"{_cushion_phrase(r)}; below 200-DMA (regime 🔴)"))
+        # (3) a NON-mean-reverting ticker whose position has violated its per-ticker
+        #     stop — spot breached the short strike by ≥ the ticker's stop depth.
+        #     Mean-reverters never fire here; we hold them through transient breaches
+        #     (per the per-ticker breach-recovery study).
+        prof = _stop_profile_for(r.symbol, r.spread_type)
+        depth = _breach_depth(r)
+        if (prof and prof.get("effective") == "NON_REVERT" and prof.get("stop_depth")
+                and depth is not None and depth >= prof["stop_depth"]):
+            cues.append(("🛑", f"non-mean-reverting — spot breached the short strike by "
+                         f"{depth*100:.1f}% (≥ {prof['stop_depth']*100:.0f}% stop) → stop-loss hit"))
         if cues:
             candidates.append((r, dte, cues))
 
@@ -428,12 +457,12 @@ def build_close_candidates_rollup(
         "<table style='border-collapse:collapse;font-size:12px'>"
         f"<tbody>{''.join(rows_html)}</tbody></table></div>"
     )
-    # stress_symbols = names firing the 🔴 (underwater + regime-stressed) cue —
-    # the set that conflicts with a NEW bullish entry recommendation on the same
-    # name today. Profit-take (💰) and T-21 (⏰) closes are NOT conflicts.
+    # stress_symbols = names firing the 🛑 stop-loss cue — the set that conflicts
+    # with a NEW bullish entry recommendation on the same name today. Profit-take
+    # (💰) and T-21 (⏰) closes are NOT conflicts.
     all_symbols = sorted({r.symbol for r, _, _ in candidates})
     stress_symbols = sorted({r.symbol for r, _, cues in candidates
-                             if any(c[0] == "🔴" for c in cues)})
+                             if any(c[0] == "🛑" for c in cues)})
     return {"text": text, "html": html,
             "symbols": all_symbols, "stress_symbols": stress_symbols}
 

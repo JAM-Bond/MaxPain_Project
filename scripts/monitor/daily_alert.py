@@ -1944,6 +1944,8 @@ def main():
     # ad-hoc via CLI. Embedding here surfaces 50%-capture and >25% candidates
     # at alert time, including the natural-vs-mid gap that flagged GS this week.
     close_stress_symbols: list[str] = []   # regime-🔴 close candidates → conflict check
+    cand: dict = {}
+    downsize_text = ""
     try:
         from scripts.monitor.close_helper import (
             build_close_block, build_close_candidates_rollup,
@@ -1968,6 +1970,21 @@ def main():
     except Exception as e:
         print(f"  ⚠ close_helper enrichment failed: {e}")
 
+    # DOWNSIZE CANDIDATES — (A) new entries the qualifier flagged half-size +
+    # (B) open long-delta positions to trim under elevated risk. Each ticker
+    # carries a brief reason. Names already in CLOSE CANDIDATES are excluded
+    # (close, don't trim). Soft-fail: never break the alert.
+    try:
+        from scripts.monitor.downsize_candidates import build_downsize_candidates
+        _dz = build_downsize_candidates(
+            conn, regime_assessment, exclude_symbols=cand.get("symbols", []))
+        downsize_text = _dz.get("text", "")
+        if downsize_text:
+            print()
+            print(downsize_text)
+    except Exception as e:
+        print(f"  ⚠ downsize candidates failed: {e}")
+
     # DTE checkpoints section
     dte_events = detect_dte_checkpoints(positions, conn)
     zebra_earnings_events = detect_zebra_earnings_warnings(positions)
@@ -1991,7 +2008,8 @@ def main():
             and not exdiv_events and not actionable_earnings
             and not extreme_events and not dte_events
             and not zebra_earnings_events and not regime_health_lines
-            and not psych_gap_text and not construction_text):
+            and not psych_gap_text and not construction_text
+            and not downsize_text):
         print(f"\n  ✓ All quiet — no alerts.")
 
     if construction_text:
