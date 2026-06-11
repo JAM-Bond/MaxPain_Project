@@ -133,11 +133,10 @@ def render_prompts_text(prompts: list[GapPrompt]) -> str:
     if not prompts:
         return ""
     lines = ["", "  PSYCH-GAP-LOG PROMPTS", "  " + "-" * 68]
-    lines.append("  Newly 🟡/🔴 since last log (status/why in POSITION HEALTH above).")
+    lines.append("  Open positions whose regime health turned 🟡/🔴 since the last log.")
     lines.append("  Report any to Claude: \"[symbol] would_close=Y/N mtm=$X note: …\"")
-    # Compact: group by current status, one wrapped line each — don't repeat the
-    # per-name structure/regime detail already in POSITION HEALTH. Trailing * = a
-    # name never logged before (vs a prior-logged status that has since worsened).
+    # Compact: group by current status, one wrapped line each. Trailing * = a name
+    # never logged before (vs a prior-logged status that has since worsened).
     def _fmt(ps: list) -> str:
         return "  ".join(
             f"{p.symbol}(id {p.trade_id}){'*' if p.last_logged_status is None else ''}"

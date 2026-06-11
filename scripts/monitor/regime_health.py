@@ -930,42 +930,10 @@ def _render_cascade(cascade: dict, rings: dict) -> list[str]:
     return lines
 
 
-def _render_bear_call_census(census: dict, cascade: dict) -> list[str]:
-    """One-line summary always; full names list when cascade is firing."""
-    lines: list[str] = []
-    n = census["n_passing"]
-    cohort = census["cohort_size"]
-    base = census.get("baseline_mean")
-    base_str = (f"{base:.1f}" if base is not None else "—")
-    base_tail = (f" (20d avg {base_str}, max {census.get('baseline_max', '—')})"
-                 if census.get("baseline_n_days", 0) > 0
-                 else " (no baseline yet — building history)")
-    lines.append(
-        f"  BEAR-CALL CENSUS (relaxed: per-name spot<200-DMA + IVR>"
-        f"{census['ivr_threshold']:.2f}, ignores SPY macro gate)"
-    )
-    lines.append(f"    Today: {n} of {cohort} cohort names pass{base_tail}")
-
-    # Full list when census is meaningful: all names whenever cascade in CASCADE
-    # state (2+🔴 trigger), or when count is non-zero
-    if n > 0 and (cascade["alert_state"] == "CASCADE" or n > (base or 0)):
-        for nm in census["names_passing"]:
-            lines.append(
-                f"      • {nm['symbol']}: spot ${nm['spot']:.2f} "
-                f"({nm['pct_to_ma200']*100:+.1f}% vs 200-DMA), IVR {nm['ivr']:.2f}"
-            )
-    if census.get("skipped"):
-        skipped_syms = ", ".join(s for s, _ in census["skipped"])
-        lines.append(f"      (skipped — insufficient data: {skipped_syms})")
-    return lines
-
-
-def render_text(assessment: dict, collapse_healthy: bool = False) -> list[str]:
-    """Returns a list of email-body lines for the REGIME HEALTH section.
-
-    collapse_healthy: in POSITION HEALTH, show only 🟡/🔴 (needs-attention) positions
-    in full and roll the 🟢 on-trend ones into a single count line — they're already
-    covered by the close-side table, so listing each in full just repeats the book."""
+def render_text(assessment: dict) -> list[str]:
+    """Returns a list of email-body lines for the REGIME HEALTH section (cascade +
+    rings + the strategy-gate composites). Per-position health and the bear-call
+    census are still computed/persisted but no longer rendered here."""
     if assessment.get("error"):
         return [f"  ⚠ Regime health: {assessment['error']}"]
 
@@ -974,7 +942,6 @@ def render_text(assessment: dict, collapse_healthy: bool = False) -> list[str]:
     pos = assessment["positions"]
     rings = assessment.get("rings")
     cascade = assessment.get("cascade")
-    census = assessment.get("bear_call_census")
 
     # Cascade + rings (early-warning section)
     if rings and cascade:
@@ -1018,34 +985,5 @@ def render_text(assessment: dict, collapse_healthy: bool = False) -> list[str]:
     lines.append(f"  zebra gate ({fz['gate_description']})")
     lines.append(f"    {fz['composite_label']}")
     lines.append(f"    Open positions: {len(pos['zebra'])} zebra")
-
-    # Per-position health
-    has_positions = any(pos[f] for f in pos)
-    if has_positions:
-        lines.append("")
-        lines.append(f"  POSITION HEALTH")
-        lines.append(f"  {'-'*68}")
-        healthy: list[str] = []
-        for fam_name in ("bull_put", "bear_call", "zebra"):
-            for p in pos[fam_name]:
-                if collapse_healthy and p["combined_status"] == "🟢":
-                    healthy.append(p["symbol"])
-                    continue
-                head = f"  {p['combined_status']} {p['symbol']} {p['structure']}"
-                if p.get("spot") is not None:
-                    lines.append(
-                        f"{head}: {p['name_label']}  "
-                        f"[sys {p['system_status']} + name {p['name_status']} = {p['combined_status']}]"
-                    )
-                else:
-                    lines.append(f"{head}: {p['name_label']}")
-        if collapse_healthy and healthy:
-            lines.append(f"  🟢 {len(healthy)} on-trend (detail in close-side table): "
-                         f"{', '.join(healthy)}")
-
-    # Bear-call census trailer
-    if census and cascade:
-        lines.append("")
-        lines.extend(_render_bear_call_census(census, cascade))
 
     return lines
