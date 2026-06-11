@@ -1,6 +1,6 @@
 # Breadth-Ring Sizing Gate — Pre-Registration
 
-**Status: DRAFT 2026-06-11 — NOT sealed. Awaiting user sign-off.**
+**Status: SEALED 2026-06-11 by user.**
 
 **Purpose:** Define, before any promotion, the exact rule by which the breadth ring would *bias the recommended size* of new long-delta credit-vertical entries — specifically, downsizing them on 🔴 (narrowing-while-extended) days — and the sealed evidence gates that rule must clear before it influences any recommendation.
 
@@ -81,8 +81,8 @@ Backtest corroboration + counterfactual: ~2–3 hours (data already on disk). Pr
 
 **Drafted by:** Claude Opus 4.8 (1M context)
 **Drafted on:** 2026-06-11
-**Sealed-by:** _pending_
-**Sealed-on:** _pending_
+**Sealed-by:** user
+**Sealed-on:** 2026-06-11
 
 ## 13. Cross-references
 
