@@ -1,6 +1,6 @@
 # Breadth Ring × ZEBRA — Exploratory Finding
 
-**Status: EXPLORATORY FINDING 2026-06-11 — NOT a sealed gate. Fragility flagged; a clean robustness study must pass before a sizing-gate pre-reg is warranted.**
+**Status: EXPLORATORY FINDING 2026-06-11. §5 ROBUSTNESS BATTERY RUN 2026-06-11 — ALL 4 TESTS PASS → a zebra-specific sizing-gate pre-reg is warranted (see §8). Still historical/in-sample; not a sealed gate yet.**
 
 **Purpose:** Document the zebra signal that surfaced from the bull_put sizing-gate corroboration ([[BREADTH_RING_SIZING_PREREG]] §14), the correction of an artifact in that run, the honest walk-forward picture, and the bar a confirmatory study must clear before any zebra sizing gate is pre-registered.
 
@@ -44,9 +44,20 @@ A confirmatory study (not yet run) must show ALL of:
 
 If all pass → draft and seal a zebra-specific sizing pre-reg (🔴 → half-size new zebra entries, advisory only, same anti-censoring tag-don't-downsize validation design as pre-reg D). If any fail → the zebra signal stays a descriptive observation (the step-B card annotation already covers zebra cards) and no gate is built.
 
+## 5a. Robustness result (RUN 2026-06-11) — ALL PASS
+
+Script: `scripts/backtest/breadth_ring_zebra_robustness.py`. Combined parent+overlay hold P&L, tier-1+tier-2 (N=2,405), tagged by entry-day ring state.
+
+- **Test 2 — overlay-variant: PASS.** 🔴 underperforms in ALL three overlays and BOTH walk-forward splits: ATM Δ −13.6, OTM-5 −15.5, OTM-10 −17.4 (full); every train/test cell negative. The earlier train-split sign-flip was a *parent-only / no-overlay* artifact — the traded (with-overlay) structure is consistent.
+- **Test 3 — drop-year: PASS.** Baseline Δ −17.4; leave-one-year-out range [−21.8, −15.0]; drop 2021 → −15.2, drop 2023 → −15.0, **drop BOTH → −12.5**. Not a 2-year artifact.
+- **Test 4 — tail counterfactual: PASS.** Half-🔴 cuts cohort CVaR-10 by **+10.7%** (−82.8 → −73.9) for a **+0.07%** change in total P&L. Skip-🔴 raises total +0.14% and also cuts the tail. The value is tail reduction at ~zero return cost (🔴 zebras ≈ break-even).
+- **Test 5 — adequacy: PASS.** 🔴 N: train 208 / test 168 (pooled adequate). Per-*year* 🔴 N is thin (13–58) — per-year inference unreliable; the signal is pooled across regime occurrences, not annual.
+
+**Caveats retained:** historical/in-sample (walk-forward split is the only OOS element); penalty far larger in the drawdown-heavy test period (−28.8) than calm train (−5.9), so the gate's value concentrates in stress and is ~nil in calm markets; cohort = the backtest cohort.
+
 ## 6. Recommendation
 
-Keep the ring **fully descriptive** for now (it already annotates zebra construction cards on 🟡/🔴 days via step B). Do NOT gate zebra sizing yet. The robustness study in §5 is the gating prerequisite; it is ~2–3 hours on data already on disk and can be run whenever. This finding exists so the signal — and its fragility — are not lost or overstated.
+The §5 bar is **met** → per the finding's own rule, **draft and seal a zebra-specific sizing pre-reg** (🔴 → half-size new zebra entries; advisory only; the anti-censoring tag-don't-downsize validation design from pre-reg D; frame the gate value as tail/CVaR reduction, since 🔴 zebras are ~break-even on mean). Until that pre-reg is sealed and (where possible) paper-corroborated, the ring stays **descriptive** — step B already annotates zebra cards on 🟡/🔴 days. Note the counterfactual marginally favors *skip* over *half* on total P&L; the pre-reg should test both half and skip.
 
 ## 7. Artifacts & cross-references
 
