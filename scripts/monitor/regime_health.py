@@ -136,6 +136,12 @@ def _assess_ivr_high(ivr: float, prior: float | None) -> dict:
     return _component("ivr", ivr, prior, s, lbl)
 
 
+def _count_phrase(n_total: int, n_yellow: int, n_red: int) -> str:
+    """Plain-language tally of a gate/ring's parts, e.g. '1 of 6 weakening, 0 broken'.
+    🟡 (weakening) = a signal degrading toward its threshold; 🔴 (broken) = crossed it."""
+    return f"{n_yellow} of {n_total} weakening, {n_red} broken"
+
+
 def _composite(components: list[dict]) -> tuple[str, int, int, str]:
     """Combine component statuses into a family-level verdict.
 
@@ -348,7 +354,7 @@ def _ring_composite_with_threshold(components: list[dict],
     if n_r >= red_name_threshold:
         return "🔴", n_y, n_r, f"RING {n_r}/{len(components)} BELOW 200-DMA"
     if n_r > 0 or n_y > 0:
-        return "🟡", n_y, n_r, f"DEGRADING ({n_r} 🔴, {n_y} 🟡)"
+        return "🟡", n_y, n_r, f"DEGRADING ({_count_phrase(len(components), n_y, n_r)})"
     return "🟢", n_y, n_r, "RING HEALTHY"
 
 
@@ -876,7 +882,8 @@ def _render_cascade(cascade: dict, rings: dict) -> list[str]:
                   f"🔴 (TAKE PROFITS / EXIT POSTURE)")
     elif state == "CAUTION":
         header = (f"  ⚠ EARLY-WARNING CASCADE — caution "
-                  f"({cascade['n_red_today']} 🔴, {cascade['n_yellow_today']} 🟡)")
+                  f"({cascade['n_yellow_today']} of 3 rings weakening, "
+                  f"{cascade['n_red_today']} broken)")
     else:
         header = "  EARLY-WARNING CASCADE — calm (all 3 rings 🟢)"
     lines.append(header)
@@ -983,7 +990,7 @@ def render_text(assessment: dict, collapse_healthy: bool = False) -> list[str]:
         lines.append(f"    {c['status']} {c['label']}{delta_str}")
     lines.append(
         f"    Composite: {fb['composite']} {fb['composite_label']} "
-        f"({fb['n_yellow']} 🟡, {fb['n_red']} 🔴)"
+        f"({_count_phrase(len(fb['components']), fb['n_yellow'], fb['n_red'])})"
     )
     lines.append(f"    Open positions: {len(pos['bull_put'])} bull_put")
 
@@ -999,7 +1006,7 @@ def render_text(assessment: dict, collapse_healthy: bool = False) -> list[str]:
         lines.append(f"    {c['status']} {c['label']}{delta_str}")
     lines.append(
         f"    Composite: {fc['composite']} {fc['composite_label']} "
-        f"({fc['n_yellow']} 🟡, {fc['n_red']} 🔴)"
+        f"({_count_phrase(len(fc['components']), fc['n_yellow'], fc['n_red'])})"
     )
     lines.append(f"    Open positions: {len(pos['bear_call'])} bear_call")
 
