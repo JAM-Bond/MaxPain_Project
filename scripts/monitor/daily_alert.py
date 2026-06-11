@@ -85,48 +85,81 @@ def detect_regime_events(df: pd.DataFrame) -> list[str]:
     # Stage transition is the headline
     if today["stage"] != prev["stage"]:
         events.append(
-            f"STAGE: {prev['stage']} → {today['stage']} "
-            f"(direction: {'tightening' if today['stage'] > prev['stage'] else 'easing'})"
+            f"Regime stage: {int(prev['stage'])} → {int(today['stage'])} "
+            f"({'stepped MORE defensive' if today['stage'] > prev['stage'] else 'stepped LESS defensive'})"
         )
 
-    # Boolean signal flips
+    # Boolean signal flips — each reads as a full sentence: what turned on/off, and why.
+    # (below_200dma and term_inverted are intentionally omitted here; the dedicated
+    #  numeric-cross messages below report those same events with more detail.)
     flag_pairs = [
-        ("h1_active", "H1 (bear regime)"),
-        ("hard_pause_active", "Hard pause"),
-        ("soft_downsize_active", "Soft-downsize"),
-        ("below_200dma", "SPY below 200dma"),
-        ("ivr_high", "SPY IVR > 0.5"),
-        ("term_inverted", "Term inverted"),
-        ("if_gate_active", "IF gate"),
-        ("bull_put_signal_active", "Bull-put signal (contango+VRP>0)"),
+        ("h1_active", "Downturn gate (H1)",
+         "SPY is now below its 200-day average AND volatility-rank is above 0.5 — "
+         "selling call spreads (the downturn strategy) is now permitted",
+         "those two conditions no longer both hold — the downturn strategy is stood down"),
+        ("hard_pause_active", "Bull-put hard pause",
+         "below the 200-day average + inverted vol curve + high volatility-rank now all "
+         "align — new put-spread (income) entries are paused",
+         "the hard-pause conditions cleared — new put-spread entries may resume"),
+        ("soft_downsize_active", "Soft-downsize",
+         "an early-caution trigger fired — new bull-put entries are cut to half size",
+         "the early-caution trigger cleared — bull-put entries return to full size"),
+        ("ivr_high", "High-volatility-rank flag",
+         "volatility-rank crossed above 0.5 — the upper half of its past-year range "
+         "('elevated'); this is the fear half of the downturn (H1) condition",
+         "volatility-rank fell back below 0.5"),
+        ("if_gate_active", "Crash-protection gate (inverted-fly)",
+         "the vol curve inverted — inverted-fly (long-volatility / crash-protection) "
+         "trades are now eligible",
+         "the vol curve normalized — inverted-fly trades are no longer eligible"),
+        ("bull_put_signal_active", "Income signal (bull-put)",
+         "contango + positive volatility-risk-premium now align — conditions favor "
+         "selling put spreads",
+         "the contango / positive-premium condition broke — the put-spread signal switched off"),
     ]
-    for col, label in flag_pairs:
+    for col, name, on_msg, off_msg in flag_pairs:
         if int(today[col]) != int(prev[col]):
-            new_state = "ON" if today[col] else "OFF"
-            events.append(f"{label}: {new_state}")
+            events.append(f"{name} turned {'ON' if today[col] else 'OFF'} — "
+                          f"{on_msg if today[col] else off_msg}")
 
-    # Numeric crosses worth flagging
-    # SPY closed across 200dma
+    # Numeric crosses worth flagging — each names the signal, the line it crossed,
+    # and the plain consequence.
+    # SPY closed across its 200-day average (the long-term trend line)
     if (today["spy_close"] - today["spy_ma200"]) * (prev["spy_close"] - prev["spy_ma200"]) < 0:
-        direction = "above" if today["spy_close"] > today["spy_ma200"] else "below"
+        below = today["spy_close"] < today["spy_ma200"]
         events.append(
-            f"SPY 200dma cross: closed {direction} (SPY ${today['spy_close']:.2f} vs "
-            f"200dma ${today['spy_ma200']:.2f})"
+            f"SPY crossed its 200-day average — closed {'below' if below else 'above'} "
+            f"the long-term trend line (SPY ${today['spy_close']:.2f} vs 200-day "
+            f"${today['spy_ma200']:.2f}). "
+            + ("This is the trend half of the downturn condition."
+               if below else "The uptrend trend-condition is re-confirmed.")
         )
 
-    # Term spread sign change
+    # Term spread crossed zero → the vol curve flipped between contango and inversion
     if today["spy_term_spread"] is not None and prev["spy_term_spread"] is not None:
         if today["spy_term_spread"] * prev["spy_term_spread"] < 0:
+            inv_now = today["spy_term_spread"] > 0    # inverted when 30d IV > 75d IV
             events.append(
-                f"Term spread flipped: {prev['spy_term_spread']:+.4f} → "
-                f"{today['spy_term_spread']:+.4f}"
+                f"Volatility curve {'INVERTED' if inv_now else 'returned to normal'} — "
+                f"the 30-day vs 75-day IV spread crossed zero "
+                f"({prev['spy_term_spread']:+.4f} → {today['spy_term_spread']:+.4f}). "
+                + ("Near-term fear now exceeds longer-dated; the crash-protection "
+                   "(inverted-fly) gate is ON."
+                   if inv_now else
+                   "Contango is restored; the inverted-fly gate is OFF.")
             )
 
-    # VRP sign change
+    # VRP (volatility-risk-premium) crossed zero → the income-signal cushion flipped
     if today["spy_vrp"] is not None and prev["spy_vrp"] is not None:
         if today["spy_vrp"] * prev["spy_vrp"] < 0:
+            pos_now = today["spy_vrp"] > 0
             events.append(
-                f"VRP flipped: {prev['spy_vrp']:+.4f} → {today['spy_vrp']:+.4f}"
+                f"Premium cushion (VRP) flipped {'positive' if pos_now else 'negative'} "
+                f"({prev['spy_vrp']:+.4f} → {today['spy_vrp']:+.4f}) — "
+                + ("options are now pricing in more movement than the market is realizing, "
+                   "which favors selling put spreads (the income signal arms, given contango)."
+                   if pos_now else
+                   "the market is now moving more than options price in; the income signal switches off.")
             )
 
     return events
@@ -272,41 +305,53 @@ def detect_approaching_thresholds(df: pd.DataFrame) -> list[str]:
     if pct is not None:
         if 0 <= pct <= 0.02:
             events.append(
-                f"SPY {pct*100:+.2f}% above 200dma — within 2% buffer "
-                f"(${t['spy_close']:.2f} vs ${t['spy_ma200']:.2f})"
+                f"SPY vs 200-day average: {pct*100:+.2f}% above the trend line "
+                f"(${t['spy_close']:.2f} vs ${t['spy_ma200']:.2f}) — inside the 2% buffer. "
+                f"A close below would step the regime toward defensive (stage 2)."
             )
         elif -0.02 <= pct < 0:
             events.append(
-                f"SPY {pct*100:+.2f}% below 200dma — recently broke down "
-                f"(${t['spy_close']:.2f} vs ${t['spy_ma200']:.2f})"
+                f"SPY vs 200-day average: {pct*100:+.2f}% below the trend line "
+                f"(${t['spy_close']:.2f} vs ${t['spy_ma200']:.2f}) — recently broke down. "
+                f"A close back above would re-confirm the uptrend."
             )
 
     ivr = t.get("spy_ivr_252")
     if ivr is not None:
         if 0.4 <= ivr < 0.5:
-            events.append(f"IVR {ivr:.3f} — approaching ivr_high threshold (0.5)")
+            events.append(
+                f"Volatility rank: {ivr:.3f}, approaching the 0.50 'elevated' line — "
+                f"crossing it arms the fear half of the downturn (H1) condition.")
         elif 0.6 <= ivr < 0.7:
-            events.append(f"IVR {ivr:.3f} — approaching soft-downsize trigger (0.7)")
+            events.append(
+                f"Volatility rank: {ivr:.3f}, approaching the 0.70 soft-downsize trigger — "
+                f"crossing it cuts new bull-put entries to half size.")
 
     ts = t.get("spy_term_spread")
     if ts is not None and -0.005 <= ts < 0:
         events.append(
-            f"Term spread {ts:+.4f} — within 0.005 of inversion (would flip IF gate ON)"
+            f"Volatility term structure: the 30-day vs 75-day IV spread is {ts:+.4f}, "
+            f"just {abs(ts):.4f} below the 0.0000 inversion line. If it crosses above, the "
+            f"vol curve inverts and the crash-protection (inverted-fly) gate turns ON."
         )
 
     vrp = t.get("spy_vrp")
     if vrp is not None:
         if -0.01 <= vrp < 0:
-            events.append(f"VRP {vrp:+.4f} — approaching positive (would lift bull_put gate)")
+            events.append(
+                f"Premium cushion (VRP): {vrp:+.4f}, approaching the 0.0000 line from below — "
+                f"crossing positive would arm the income (put-spread) signal.")
         elif 0 < vrp <= 0.01:
-            events.append(f"VRP {vrp:+.4f} — approaching negative (would weaken bull_put gate)")
+            events.append(
+                f"Premium cushion (VRP): {vrp:+.4f}, approaching the 0.0000 line from above — "
+                f"crossing negative would switch the income (put-spread) signal off.")
 
     vix = t.get("spy_vix") if 'spy_vix' in t.index else None
     if vix is not None:
         if 18 <= vix < 20:
-            events.append(f"VIX {vix:.2f} — approaching elevated (20)")
+            events.append(f"Fear index (VIX): {vix:.2f}, approaching the elevated line (20).")
         elif vix >= 25:
-            events.append(f"VIX {vix:.2f} — significantly elevated")
+            events.append(f"Fear index (VIX): {vix:.2f} — significantly elevated (above 25).")
 
     return events
 
@@ -1729,11 +1774,11 @@ def main():
         print(f"\n  CHANGING MARKET TRENDS")
         print(f"  {'-'*68}")
         if regime_events:
-            print(f"  Just changed (vs yesterday):")
+            print(f"  Just crossed a threshold (changed vs yesterday):")
             for ev in regime_events:
                 print(f"    ⚠ {ev}")
         if approach_events:
-            print(f"  Approaching a threshold (in buffer zone, days out):")
+            print(f"  Close to a threshold (could cross within days):")
             for ev in approach_events:
                 print(f"    ⓘ {ev}")
         if trajectory_events:
