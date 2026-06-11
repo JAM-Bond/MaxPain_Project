@@ -1881,10 +1881,26 @@ def main():
     except Exception as e:
         print(f"\n  PRE-CYCLE COMMENTARY — unavailable ({e.__class__.__name__}: {e})")
 
+    # REGIME HEALTH section (system + per-position; persists to history).
+    # Placed immediately above OPEN TRADES so the regime read frames the book that
+    # follows. `positions` is loaded here (used by both this and the open-trade section).
+    positions = load_open_positions(conn)
+    from scripts.monitor.regime_health import assess_all, persist, render_text
+    regime_assessment = assess_all(conn, date.today(), positions)
+    regime_health_lines = render_text(regime_assessment, collapse_healthy=True)
+    if regime_health_lines:
+        print(f"\n  REGIME HEALTH")
+        print(f"  {'-'*68}")
+        for line in regime_health_lines:
+            print(line)
+    try:
+        persist(conn, regime_assessment)
+    except Exception as e:
+        print(f"  ⚠ regime health persistence failed: {e}")
+
     # Open-trade section
     print("\n  OPEN TRADES")
     print(f"  {'-'*68}")
-    positions = load_open_positions(conn)
     thresholds = load_thresholds(conn)
     n_pos = len(positions)
     n_syms = positions["symbol"].nunique() if n_pos else 0
@@ -1946,20 +1962,6 @@ def main():
         print(f"  {'-'*68}")
         for c in if_candidates:
             print(f"  {c}")
-
-    # REGIME HEALTH section (system + per-position; persists to history)
-    from scripts.monitor.regime_health import assess_all, persist, render_text
-    regime_assessment = assess_all(conn, date.today(), positions)
-    regime_health_lines = render_text(regime_assessment, collapse_healthy=True)
-    if regime_health_lines:
-        print(f"\n  REGIME HEALTH")
-        print(f"  {'-'*68}")
-        for line in regime_health_lines:
-            print(line)
-    try:
-        persist(conn, regime_assessment)
-    except Exception as e:
-        print(f"  ⚠ regime health persistence failed: {e}")
 
     # PSYCH-GAP-LOG PROMPTS (SEP-live transition checklist item 1)
     # Surfaces open positions newly at 🟡/🔴 since last log entry so the
