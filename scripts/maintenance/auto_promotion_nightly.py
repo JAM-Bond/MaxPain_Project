@@ -216,6 +216,21 @@ def _format_promote_line(d) -> str:
             f"mean={mean_str} {units:11s}  val_n={val_n:>3d}  p={p_str}")
 
 
+def _breach_note(ticker: str, structure: str) -> str | None:
+    """The EXACT daily-alert BREACH PROFILE language for a promoted credit vertical
+    (mean-revert recovery-rate/days vs robust non-revert stop depth). Ensures the
+    name has a stop profile first (scan-on-miss, so a brand-new promotion is profiled
+    on the spot). Returns the indented note line or None. Soft-fail: never break the
+    promotion email."""
+    try:
+        from lib.ticker_stop_profile import ensure_profile, card_note
+        ensure_profile(ticker)
+        note = card_note(ticker, structure)
+        return ("    " + note["text"].strip()) if note else None
+    except Exception:
+        return None
+
+
 def _format_demote_line(d) -> str:
     """One-line render of a DEMOTE / DEMOTE_DEFERRED decision."""
     gf = d.detail.get("gate_f", {})
@@ -283,6 +298,9 @@ def _build_email_body(run_date: date,
             text_lines.append(f"  ── {s} ({len(group)}) ──")
             for d in group:
                 text_lines.append(_format_promote_line(d))
+                bn = _breach_note(d.ticker, d.structure)
+                if bn:
+                    text_lines.append(bn)
         text_lines.append("")
 
         # Tier-1 advisory: macro-archetype concentration across the promoted SET
