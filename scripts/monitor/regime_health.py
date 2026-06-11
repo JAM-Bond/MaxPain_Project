@@ -136,10 +136,11 @@ def _assess_ivr_high(ivr: float, prior: float | None) -> dict:
     return _component("ivr", ivr, prior, s, lbl)
 
 
-def _count_phrase(n_total: int, n_yellow: int, n_red: int) -> str:
+def _count_phrase(n_total: int, n_yellow: int, n_red: int, red_word: str = "broken") -> str:
     """Plain-language tally of a gate/ring's parts, e.g. '1 of 6 weakening, 0 broken'.
-    🟡 (weakening) = a signal degrading toward its threshold; 🔴 (broken) = crossed it."""
-    return f"{n_yellow} of {n_total} weakening, {n_red} broken"
+    🟡 (weakening) = a signal degrading toward its threshold; 🔴 = crossed it
+    ('broken' for a ring/name breaking trend, 'closed' for a strategy gate)."""
+    return f"{n_yellow} of {n_total} weakening, {n_red} {red_word}"
 
 
 def _composite(components: list[dict]) -> tuple[str, int, int, str]:
@@ -990,7 +991,7 @@ def render_text(assessment: dict, collapse_healthy: bool = False) -> list[str]:
         lines.append(f"    {c['status']} {c['label']}{delta_str}")
     lines.append(
         f"    Composite: {fb['composite']} {fb['composite_label']} "
-        f"({_count_phrase(len(fb['components']), fb['n_yellow'], fb['n_red'])})"
+        f"({_count_phrase(len(fb['components']), fb['n_yellow'], fb['n_red'], red_word='closed')})"
     )
     lines.append(f"    Open positions: {len(pos['bull_put'])} bull_put")
 
@@ -1006,7 +1007,7 @@ def render_text(assessment: dict, collapse_healthy: bool = False) -> list[str]:
         lines.append(f"    {c['status']} {c['label']}{delta_str}")
     lines.append(
         f"    Composite: {fc['composite']} {fc['composite_label']} "
-        f"({_count_phrase(len(fc['components']), fc['n_yellow'], fc['n_red'])})"
+        f"({_count_phrase(len(fc['components']), fc['n_yellow'], fc['n_red'], red_word='closed')})"
     )
     lines.append(f"    Open positions: {len(pos['bear_call'])} bear_call")
 
