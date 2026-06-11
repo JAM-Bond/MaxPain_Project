@@ -1943,7 +1943,6 @@ def main():
     # Sourced from scripts/monitor/close_helper.py — same module the user runs
     # ad-hoc via CLI. Embedding here surfaces 50%-capture and >25% candidates
     # at alert time, including the natural-vs-mid gap that flagged GS this week.
-    close_text = ""
     close_stress_symbols: list[str] = []   # regime-🔴 close candidates → conflict check
     try:
         from scripts.monitor.close_helper import (
@@ -1958,18 +1957,14 @@ def main():
             cand = build_close_candidates_rollup(
                 close_block.get("rows", []), conn, date.today().isoformat()
             )
-        close_text = close_block.get("text", "")
         close_stress_symbols = cand.get("stress_symbols", [])
-        # CLOSE CANDIDATES TODAY rollup — actionable summary first.
+        # CLOSE CANDIDATES TODAY rollup — the actionable summary. The full
+        # per-position close-side mark table ("OPEN POSITIONS") was removed from the
+        # alert (positions are visible in the broker); run close_helper via CLI for
+        # the full enumeration when needed.
         if cand.get("text"):
             print()
             print(cand["text"])
-        # close_text already contains its own Errors:/Not-priced footer (from
-        # close_helper._render_text) — do NOT re-print close_block["errors"] here
-        # or every error shows twice.
-        if close_text and close_text != "No open placed positions.":
-            print()
-            print(close_text)
     except Exception as e:
         print(f"  ⚠ close_helper enrichment failed: {e}")
 
