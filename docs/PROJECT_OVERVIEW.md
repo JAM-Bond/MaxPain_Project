@@ -13,7 +13,7 @@ what the system is for, how it chooses what to trade, and the reasoning behind e
 layer of the design. It assumes no prior familiarity with the project and can be read
 on its own as a description of the approach.
 
-**Part II — Operating the System** (sections 7–13) is a user's guide. It describes the
+**Part II — Operating the System** (sections 7–14) is a user's guide. It describes the
 daily rhythm of running the system, how to read what it produces, how to use the
 dashboard, what a single trading cycle looks like from start to finish, and the routine
 maintenance the system needs to keep running.
@@ -205,7 +205,7 @@ its own vital signs. A heartbeat monitor confirms that every scheduled job ran t
 before and raises an alarm for any that silently failed to appear. Two brokerage-auth
 health checks verify that the read-only connection to the brokerage is alive and warn,
 with two days of lead time, when the weekly re-authorization is about to be required
-(see section 12). A database backup is taken and integrity-checked.
+(see section 13). A database backup is taken and integrity-checked.
 
 **Mid-morning — the qualifier decides eligibility.** Around the market open the system
 takes a fresh snapshot of the research cohort and refreshes the earnings calendar, then
@@ -303,9 +303,9 @@ checking the book mid-cycle. It is organized as a set of pages:
   alert can be re-read without digging through email.
 - **Cohorts** — which names belong to each structure's cohort and which carry validated
   per-ticker recommendations for moneyness or wing width.
-- **Analytics** — cross-trade learning queries over the trade ledger: how structures and
-  names have performed, each reported with its sample size and an honest adequacy flag so
-  that thin evidence is never mistaken for a conclusion.
+- **Analytics** — cross-trade learning queries over the trade ledger (section 12): how
+  structures and names have performed, each reported with its sample size and an honest
+  adequacy flag so that thin evidence is never mistaken for a conclusion.
 - **Post-Mortem** — the interpretive synthesis produced after each cycle closes
   (section 11).
 - **Bond Portfolio** — the held-to-maturity fixed-income side of the account, kept
@@ -369,7 +369,19 @@ followed.
 
 ---
 
-## 12. Routine Maintenance and What Can Break
+## 12. The Trade Ledger
+
+Every layer described so far either decides what to trade or reports on what is open. The trade ledger is where the system *remembers* what it has done, in enough structured detail to learn from it. It is the connective tissue between three things the rest of the system otherwise keeps apart: what the framework recommended, the conditions it was recommended in, and what actually happened.
+
+When a position closes, the ledger does not merely record its profit or loss. It enriches that outcome with the full context of the trade's life: the market regime at the moment of entry and again at exit, the qualifier verdict and the plain-language reason that admitted the position in the first place — its provenance — the worst drawdown the position endured while it was held, and an inferred classification of how it ended, whether at a profit target, at the twenty-one-day management cue, at the loss-cap stop, or by the trader's discretion. A position placed without a matching qualifier recommendation is flagged as off-script, so the disciplined trades and the discretionary ones never blur together in the record.
+
+The value of assembling all of this in one place is that it turns a pile of closed tickets into queryable experience. The system can then ask the questions that improve the framework rather than the ones that manage a single position: which structures actually paid, and in which regimes; whether a given name has earned its place in the cohort or merely survived a friendly market; whether trades taken off-script fared better or worse than the ones the framework chose; whether the system's exits are systematically early or late. These are the questions the post-mortem (section 11) and the Analytics view of the dashboard (section 10) draw on, and the ledger is the substrate that makes them answerable.
+
+One discipline governs every answer the ledger produces: each statistic is reported alongside an adequacy flag tied to its sample size, so that a result drawn from six trades is labeled preliminary and never carries the weight of one drawn from forty. This is the same refusal to over-read thin evidence that runs through the rest of the system. The ledger accumulates experience honestly — marking how much of it there actually is — rather than manufacturing confidence the sample cannot support. Over time it is the system's institutional memory: the record against which the framework's real behavior, not its backtested promise, is judged.
+
+---
+
+## 13. Routine Maintenance and What Can Break
 
 The system is built to run unattended, but a small number of things need a human, and a
 few failure modes are worth knowing about.
@@ -407,7 +419,7 @@ else maintains itself.
 
 ---
 
-## 13. Paper-Test Discipline and Going Live
+## 14. Paper-Test Discipline and Going Live
 
 The system is run under a deliberate paper-testing regime before any real capital is
 committed. Through the paper-test window, every recommendation is tracked exactly as it
@@ -501,6 +513,11 @@ also defined in the body, the glossary entry is the short reference version.
 - **Post-mortem** — The after-cycle review that reads the cycle's artifacts through a sealed reasoning framework to ask whether the framework was executed consistently.
 - **The book** — The set of currently open positions.
 - **Harness** — The software framework — scheduled jobs, alert, dashboard, database — that runs the whole system.
+- **Trade ledger** — The system's structured memory of closed trades: each outcome enriched with entry/exit regime, qualifier provenance, drawdown, and exit type, so performance can be sliced by structure, name, and regime. The cross-trade learning substrate (section 12).
+- **MAE (maximum adverse excursion)** — The worst unrealized loss a position reached at any point during the hold, regardless of where it finally closed. A measure of how much heat a trade took.
+- **Exit type** — The inferred reason a trade closed: profit target, twenty-one-day management cue, loss-cap stop, or trader discretion.
+- **Off-script** — A position that was placed without a matching qualifier recommendation — i.e., a discretionary trade taken outside the framework. Flagged in the ledger so it is never pooled with framework-driven trades.
+- **Adequacy flag** — A sample-size honesty label attached to every aggregate statistic: preliminary (<10 trades), suggestive (<20), developing (<30), adequate (≥30). Keeps thin evidence from being read as a conclusion.
 
 **The five regime stages**
 
