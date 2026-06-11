@@ -98,8 +98,9 @@ COHORT_ZEBRA_TIER2 = [
     "OKE", "LYV", "LNG", "MPC", "ADM", "LIN",
     "EIX", "AZN", "PWR", "SCCO", "TBT", "MTZ",
     "KEYS", "SOXX", "XLK", "SE", "RMBS", "TER",
-    "PSX", "COST", "CDNS", "TMUS", "AMGN",
-]  # auto-promotion update 2026-06-05
+    "PSX", "COST", "CDNS", "TMUS", "AMGN", "BURL",
+    "ROST",
+]  # auto-promotion update 2026-06-10
 
 # Per-name overlay AUTO-attach cohort.
 # Names where the V3 (10% OTM put) overlay showed positive cohort-level lift
