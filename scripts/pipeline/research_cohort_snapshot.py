@@ -39,6 +39,7 @@ sys.path.insert(0, str(Path.home() / "MaxPain_Project"))
 from lib.db import DB_PATH, connect  # noqa: E402
 from lib.snapshot import take_snapshot, current_opex  # noqa: E402
 from lib.adjusted_close import load_adjusted_close  # noqa: E402
+from scripts.maintenance.orats_health_check import previous_business_day  # noqa: E402
 
 ROOT = Path.home() / "MaxPain_Project"
 
@@ -345,6 +346,26 @@ def main() -> None:
     else:
         print("    (insufficient SPY history; regime computation skipped)")
 
+    # Go-live guard (D4): refuse to stamp today's snapshot_date on stale ORATS
+    # data. This is the 2026-05-21→26 incident mode — SFTP delivery breaks,
+    # daily.iloc[-1] is days old, and a fresh-dated regime row silently drives
+    # the 9:25 qualifier.
+    #
+    # Expectation is TWO business days back, not one: ORATS delivers trade
+    # date D at ~19:00 on D+1 (verified from parquet mtimes 2026-06), so at
+    # this 9:20 run the freshest possible close is D-2. A 1-day expectation
+    # would false-alarm every morning. Day-1 stalls are caught the same
+    # evening by orats_health (19:40, expects D-1); this guard catches day-2+
+    # at 9:20 — before the 9:25 qualifier — and withholds the regime write.
+    regime_stale = False
+    if regime is not None:
+        expected_close = previous_business_day(previous_business_day(today))
+        as_of = date.fromisoformat(regime["as_of_close"])
+        if as_of < expected_close:
+            regime_stale = True
+            print(f"    ✗ STALE ORATS INPUT: regime as_of_close {as_of} is older "
+                  f"than expected {expected_close} — regime_state will NOT be written.")
+
     if args.dry_run:
         print(f"\nDry-run: {len(snaps)}/{len(cohort)} snapshots captured (not written).")
         if regime is not None:
@@ -354,7 +375,7 @@ def main() -> None:
     if not args.regime_only:
         n = write_snapshots(snaps)
         print(f"\n  ✓ live_snapshots updated  ({n} rows upserted)")
-    if regime is not None:
+    if regime is not None and not regime_stale:
         write_regime_state(regime)
         print(f"  ✓ regime_state updated  (stage={regime['stage']})")
     print(f"✓ Snapshot complete — {len(snaps)}/{len(cohort)} symbols captured.\n")
@@ -364,6 +385,14 @@ def main() -> None:
     # qualifier to run on stale max_pain.
     if not args.regime_only and cohort and not snaps:
         print("✗ 0 snapshots captured — exiting 1 so cron traps it.")
+        sys.exit(1)
+
+    # Stale-ORATS guard tripped: live_snapshots (Schwab, live) were still
+    # written above, but regime_state was withheld. Exit non-zero so run_cron
+    # emails at 9:20 — BEFORE the 9:25 qualifier runs on yesterday's regime row.
+    if regime_stale:
+        print("✗ Stale ORATS regime input — exiting 1 so cron traps it "
+              "(regime_state not updated; check ORATS SFTP delivery).")
         sys.exit(1)
 
 

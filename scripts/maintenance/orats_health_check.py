@@ -11,8 +11,12 @@ Designed to catch the failure mode where SFTP delivery silently breaks
 without notice). The auto-promotion pipeline kept "working" on stale
 data for 5 days before discovery.
 
-Cron: 0 10 * * 1-5  (10:00 ET weekdays — after overnight delivery window,
-                      before market-open distraction).
+Cron: 19:40 ET weekdays (launchd com.maxpain.orats_health) — after the
+19:00 orats_daily ingest. ORATS delivers trade date D at ~19:00 on D+1,
+so "expected = previous business day" is correct for this evening slot.
+A morning-side guard with the matching D-2 expectation lives in
+scripts/pipeline/research_cohort_snapshot.py (9:20, blocks the regime
+write before the 9:25 qualifier).
 
 Output:
   - Exit 0 if healthy

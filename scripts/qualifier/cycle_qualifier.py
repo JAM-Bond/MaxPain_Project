@@ -42,7 +42,9 @@ from lib.opex_calendar import (  # noqa: E402
     calendar_days_before,
 )
 from scripts.qualifier import gate_config as G  # noqa: E402
-from scripts.qualifier.earnings_calendar import upcoming_earnings  # noqa: E402
+from scripts.qualifier.earnings_calendar import (  # noqa: E402
+    upcoming_earnings, upcoming_earnings_with_status,
+)
 from lib.sector_map import get_sector, is_cap_exempt, ETF_SENTINEL, UNKNOWN_SENTINEL  # noqa: E402
 from lib.adjusted_close import load_adjusted_close  # noqa: E402
 from lib import macro_profile as macro_lib  # noqa: E402
@@ -194,8 +196,23 @@ def fetch_schwab_spots(symbols: list[str]) -> dict[str, float]:
 
 # ─── Regime state loader ──────────────────────────────────────────────
 
-def load_regime_state(run_date: date) -> dict | None:
-    """Most recent regime_state row on or before run_date. Returns dict or None."""
+# Age bound on the regime row (go-live audit D4/C5). The 9:20 snapshot
+# writer stamps snapshot_date = run day, so on a healthy morning the row is
+# same-day. snapshot_date < run_date means the 9:20 cron failed or its
+# stale-ORATS guard tripped (it already emailed) — verdicts still run but
+# every actionable row is annotated. Beyond REGIME_REFUSE_AFTER_DAYS
+# calendar days the pipeline is genuinely broken: refuse to emit OpEx
+# verdicts at all rather than qualify on ancient regime data.
+REGIME_REFUSE_AFTER_DAYS = 5
+
+
+def load_regime_state(run_date: date) -> tuple[dict | None, str | None]:
+    """Most recent regime_state row on or before run_date.
+
+    Returns (row dict or None, staleness warning or None). The row is None
+    when the table is empty OR the freshest row is older than
+    REGIME_REFUSE_AFTER_DAYS — in both cases no OpEx verdicts are emitted.
+    """
     conn = connect()
     try:
         cur = conn.execute(
@@ -205,11 +222,29 @@ def load_regime_state(run_date: date) -> dict | None:
         )
         row = cur.fetchone()
         if row is None:
-            return None
+            return None, None
         cols = [d[0] for d in cur.description]
-        return dict(zip(cols, row))
+        regime = dict(zip(cols, row))
     finally:
         conn.close()
+
+    snap = date.fromisoformat(str(regime["snapshot_date"]))
+    age = (run_date - snap).days
+    if age > REGIME_REFUSE_AFTER_DAYS:
+        return None, (
+            f"regime_state is {age} days old (snapshot {snap}, as-of close "
+            f"{regime.get('as_of_close')}) — beyond the {REGIME_REFUSE_AFTER_DAYS}-day "
+            f"refuse bound; NO OpEx verdicts emitted. Fix the 9:20 snapshot "
+            f"pipeline (ORATS delivery / research_cohort cron)."
+        )
+    if age > 0:
+        return regime, (
+            f"regime_state is from {snap} ({age}d old; as-of close "
+            f"{regime.get('as_of_close')}) — today's 9:20 snapshot writer did not "
+            f"run or its stale-ORATS guard tripped. Verdicts below use the older "
+            f"regime row; verify before acting."
+        )
+    return regime, None
 
 
 # ─── Entry-window calculation ─────────────────────────────────────────
@@ -465,13 +500,16 @@ def evaluate_opex_cell(symbol: str, structure: str, window_label: str,
     return row
 
 
-def load_cohort_earnings(run_date: date) -> dict[str, list[date]]:
+def load_cohort_earnings(run_date: date) -> tuple[dict[str, list[date]], set[str]]:
     """Earnings calendar for the union of every OpEx + earnings cohort.
 
-    Returns {symbol: sorted upcoming earnings dates}. Used by the
-    earnings-in-holding-window gate in evaluate_opex_cell. ETFs return empty
-    (yfinance does not cover them) — that is the correct state: ETFs have no
-    binary earnings event.
+    Returns ({symbol: sorted upcoming earnings dates}, failed) where `failed`
+    is the set of symbols whose fetch FAILED — earnings status UNKNOWN, not
+    "no earnings". Used by the earnings-in-holding-window gate in
+    evaluate_opex_cell; main() annotates actionable verdicts on failed names
+    so a yfinance outage can never silently disable the gate (go-live audit
+    C5). ETFs return verified-empty (sentinel rows in the cache) — that is
+    the correct state: ETFs have no binary earnings event.
     """
     all_syms = sorted(set(
         G.COHORT_BULL_PUT
@@ -486,13 +524,13 @@ def load_cohort_earnings(run_date: date) -> dict[str, list[date]]:
     ))
     # 180-day horizon covers the longest window: ZEBRA 75-DTE entry against
     # the 5th-out OpEx (~150d total).
-    cal = upcoming_earnings(all_syms, run_date, window_days=180)
+    cal, failed = upcoming_earnings_with_status(all_syms, run_date, window_days=180)
     out: dict[str, list[date]] = {}
     if cal.empty:
-        return out
+        return out, failed
     for sym, grp in cal.groupby("ticker"):
         out[sym] = sorted(grp["earnings_date"].tolist())
-    return out
+    return out, failed
 
 
 def build_opex_verdicts(regime: dict, windows: dict, run_date: date,
@@ -744,10 +782,12 @@ def format_verdicts(verdict_rows: list[dict]) -> str:
 
     df = pd.DataFrame(verdict_rows)
 
-    # Per-structure summary table
+    # Per-structure summary table. CAPPED = SKIP_CONCENTRATION (sector cap) —
+    # counted separately from SKIP so capped names can't silently vanish from
+    # the human-readable report (go-live audit F3).
     summary_lines = ["  Per-structure summary:"]
     summary_lines.append(f"    {'structure':<22} {'window':<25} {'GO':>4} "
-                         f"{'DOWN':>5} {'PEND':>5} {'SKIP':>5} {'PAUSE':>6}")
+                         f"{'DOWN':>5} {'PEND':>5} {'SKIP':>5} {'CAPPED':>7} {'PAUSE':>6}")
     for (structure, window), grp in df.groupby(["structure", "window"]):
         counts = grp["verdict"].value_counts()
         summary_lines.append(
@@ -756,12 +796,14 @@ def format_verdicts(verdict_rows: list[dict]) -> str:
             f"{counts.get(G.VERDICT_DOWNSIZE, 0):>5} "
             f"{counts.get(G.VERDICT_PENDING, 0):>5} "
             f"{counts.get(G.VERDICT_SKIP, 0):>5} "
+            f"{counts.get(G.VERDICT_SKIP_CONCENTRATION, 0):>7} "
             f"{counts.get(G.VERDICT_PAUSE, 0):>6}"
         )
 
     # Actionable rows: GO + DOWNSIZE
     actionable = df[df["verdict"].isin([G.VERDICT_GO, G.VERDICT_DOWNSIZE])]
     pause_rows = df[df["verdict"] == G.VERDICT_PAUSE]
+    capped_rows = df[df["verdict"] == G.VERDICT_SKIP_CONCENTRATION]
 
     out_lines = list(summary_lines)
     if not actionable.empty:
@@ -779,6 +821,16 @@ def format_verdicts(verdict_rows: list[dict]) -> str:
     else:
         out_lines.append("")
         out_lines.append("  No GO verdicts today (all PENDING or SKIP).")
+
+    # Names cut by the sector-concentration cap — qualified on every gate but
+    # dropped by ranking. Always listed so the cut is visible, never silent.
+    if not capped_rows.empty:
+        out_lines.append("")
+        out_lines.append("  Capped out today (qualified, cut by concentration ranking):")
+        for _, r in capped_rows.iterrows():
+            out_lines.append(
+                f"    {r['symbol']:>6} | {r['structure']:<22} | {r['reason']}"
+            )
 
     return "\n".join(out_lines)
 
@@ -1105,7 +1157,10 @@ def write_parquet_artifact(rows: list[dict], regime: dict, run_date: date) -> Pa
     out = QUALIFIER_DIR / f"qualifier_{run_date}.parquet"
     if not rows:
         return out
-    df = pd.DataFrame(rows)
+    # Strip internal "_"-prefixed temp keys (e.g. the _ev EVScore object stamped
+    # by annotate_bucket_ev when a concentration cap fires) — raw objects are not
+    # parquet-serializable and would crash the run with pyarrow ArrowInvalid.
+    df = pd.DataFrame([{k: v for k, v in r.items() if not k.startswith("_")} for r in rows])
     df["run_date"] = str(run_date)
     if regime:
         df["regime_stage"] = regime.get("stage")
@@ -1131,9 +1186,9 @@ def main():
         if args.run_date else date.today()
     )
 
-    regime = load_regime_state(run_date)
+    regime, regime_warning = load_regime_state(run_date)
     windows = compute_window_targets(run_date)
-    earnings_by_sym = load_cohort_earnings(run_date)
+    earnings_by_sym, earnings_failed = load_cohort_earnings(run_date)
 
     # Live spots for the budget-cap gate (ZEBRA + IF only). Single bulk call.
     budget_gated_syms = sorted(set(
@@ -1165,10 +1220,63 @@ def main():
     # runs after it so it only re-sizes still-actionable rows.
     verdict_rows = apply_macro_concentration_cap(verdict_rows, ev_cache=ev_cache)
 
+    # ── Fail-open visibility (go-live audit C5/F3) ────────────────────────
+    # The earnings gate and the budget-cap gate silently disable themselves
+    # when their input feed fails (yfinance / Schwab). That must never be
+    # invisible: annotate every actionable verdict whose gate went unchecked
+    # (the annotation persists to the DB reason and rides into the daily
+    # alert), and collect loud warnings for the report header.
+    gate_warnings: list[str] = []
+    actionable_verdicts = (G.VERDICT_GO, G.VERDICT_DOWNSIZE)
+
+    if regime_warning:
+        gate_warnings.append(f"⚠ REGIME: {regime_warning}")
+        # Earnings-track rows (opex = "(earnings-anchored)") are regime-free
+        # by design — only OpEx-track verdicts ride on the stale regime row.
+        for r in verdict_rows:
+            if (r["verdict"] in actionable_verdicts
+                    and "earnings-anchored" not in str(r.get("opex", ""))):
+                r["reason"] += " ⚠ STALE REGIME (see run warnings)"
+
+    if earnings_failed:
+        hit = [r for r in verdict_rows
+               if r["symbol"] in earnings_failed
+               and r["verdict"] in actionable_verdicts
+               and not (r["structure"].endswith("_earnings")
+                        or r["structure"].startswith("zebra"))]
+        for r in hit:
+            r["reason"] += " ⚠ EARNINGS UNVERIFIED (calendar fetch failed)"
+        gate_warnings.append(
+            f"⚠ EARNINGS: calendar fetch FAILED for {len(earnings_failed)} "
+            f"symbol(s) ({', '.join(sorted(earnings_failed))}) — the "
+            f"binary-earnings gate was NOT applied for them"
+            + (f"; {len(hit)} actionable verdict(s) annotated" if hit else "")
+        )
+
+    budget_unchecked = [r for r in verdict_rows
+                        if G.BUDGET_CAPS.get(r["structure"]) is not None
+                        and r["verdict"] in actionable_verdicts
+                        and spots.get(r["symbol"]) is None]
+    if budget_unchecked:
+        for r in budget_unchecked:
+            cap = G.BUDGET_CAPS[r["structure"]]
+            r["reason"] += f" ⚠ BUDGET CAP UNCHECKED (no Schwab quote; cap ${cap:.0f})"
+        names = ", ".join(sorted({r["symbol"] for r in budget_unchecked}))
+        gate_warnings.append(
+            f"⚠ BUDGET: no Schwab quote for {names} — the ${'/'.join(f'{c:.0f}' for c in sorted(set(G.BUDGET_CAPS.values())))} "
+            f"budget cap was NOT checked on their actionable verdicts"
+        )
+
     print()
     print("=" * 78)
     print(f"  MaxPain Cycle Qualifier — {run_date}")
     print("=" * 78)
+    if gate_warnings:
+        print()
+        print("RUN WARNINGS — gates that could not be fully applied")
+        print("-" * 78)
+        for w in gate_warnings:
+            print(f"  {w}")
     print()
     print("REGIME STATE")
     print("-" * 78)

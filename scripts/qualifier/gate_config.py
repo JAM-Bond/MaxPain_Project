@@ -415,6 +415,7 @@ def is_in_cohort(symbol: str, structure: str) -> bool:
         "bear_call_earnings": COHORT_EARNINGS_BEAR_CALL,
         "inverted_fly_earnings": COHORT_EARNINGS_INVERTED_FLY,
         "covered_call": COHORT_COVERED_CALL,
+        "anti_zebra": COHORT_ANTI_ZEBRA_TIER1,
     }
     return symbol in cohorts.get(structure, [])
 
@@ -423,7 +424,7 @@ def is_in_cohort(symbol: str, structure: str) -> bool:
 ALL_STRUCTURES = [
     "bull_put", "bear_call",
     "inverted_fly_pair", "inverted_fly_single",
-    "zebra_tier1", "zebra_tier2",
+    "zebra_tier1", "zebra_tier2", "anti_zebra",
     "bull_put_earnings", "bear_call_earnings", "inverted_fly_earnings",
     "covered_call",
 ]
