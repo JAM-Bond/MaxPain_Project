@@ -34,7 +34,7 @@ ROOT = Path.home() / "MaxPain_Project"
 SOUL_PATH = ROOT / "config" / "SOUL.md"
 API_KEYS_ENV = ROOT / "config" / "api_keys.env"
 
-MODEL = "claude-opus-4-7"
+MODEL = "claude-fable-5"
 MAX_TOKENS = 4000  # macro narrative is shorter than post-mortem
 
 

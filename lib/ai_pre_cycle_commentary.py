@@ -37,7 +37,7 @@ API_KEYS_ENV = ROOT / "config" / "api_keys.env"
 VERSION = "v2"
 PROMPT_PATH = ROOT / "prompts" / "pre_cycle_commentary" / f"{VERSION}.md"
 
-MODEL = "claude-opus-4-7"
+MODEL = "claude-fable-5"
 MAX_TOKENS = 8000
 
 

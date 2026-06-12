@@ -5,7 +5,7 @@ prefix), sends a data bundle as the user message, returns Claude's
 analysis. Caches responses by (opex, bundle_hash) in SQLite so flipping
 back to a cycle doesn't re-charge the API.
 
-Model: claude-opus-4-7 with adaptive thinking + effort=high.
+Model: claude-fable-5 with adaptive thinking + effort=high.
 """
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ ROOT = Path.home() / "MaxPain_Project"
 SOUL_PATH = ROOT / "config" / "SOUL.md"
 API_KEYS_ENV = ROOT / "config" / "api_keys.env"
 
-MODEL = "claude-opus-4-7"
+MODEL = "claude-fable-5"
 MAX_TOKENS = 16000
 
 

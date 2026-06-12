@@ -2,7 +2,7 @@
 
 ## Abstract
 
-MaxPain Project is a quantitative research system that studies price behavior in the 21-trading-day window surrounding monthly options expiration (OpEx) across a universe of 50 liquid equities, sector ETFs, and broad-market indices. The central hypothesis is that dealer delta-hedging obligations produce a structural, tradeable price pattern around each monthly expiration — a mechanical pull toward the *max pain* strike that maximizes aggregate option-holder losses. The mechanic is argued to be contractual rather than informational, on three grounds: (a) market makers hedge whether or not the pattern is known to other participants; (b) the mechanism has survived in the options literature for 15+ years without visible decay; (c) held-out chronological validation across a 50/50 split (`grid_search_validation.py`) shows 0 of 31 confirmed symbols lose significance out of sample. The project operationalizes this hypothesis through a layered statistical framework, a two-layer symbol-ranking system, an AI analytical layer (Anthropic Claude Sonnet, referred to throughout as the **SOUL**) that consumes the per-symbol payload and produces ranked trading decisions under an explicit rule hierarchy, and two parallel trading approaches currently running a head-to-head empirical bake-off. The first *live-money* cycle (April 2026 OpEx) closed 11 stock positions with realized P&L of **+$1,761** (9 winners, 2 losers; hit rate 82%). Both losers were energy-sector regime casualties of the April 8 2026 US-Iran oil truce (XOM −6.88%, XLE −5.07%) — failures of environment, not of the mechanic. Concurrently, 23 *paper-evaluated* credit-spread recommendations from the Original system closed for the same OpEx, and 40 *paper-evaluated* spread trades from the Score system remain open for the May 15 OpEx. The May and June 2026 cycles will provide the first comparable evidence between the two parallel approaches; the resulting post-mortem cross-tabs will drive the decision about which components of each system — or which combination — survive into a merged production book.
+MaxPain Project is a quantitative research system that studies price behavior in the 21-trading-day window surrounding monthly options expiration (OpEx) across a universe of 50 liquid equities, sector ETFs, and broad-market indices. The central hypothesis is that dealer delta-hedging obligations produce a structural, tradeable price pattern around each monthly expiration — a mechanical pull toward the *max pain* strike that maximizes aggregate option-holder losses. The mechanic is argued to be contractual rather than informational, on three grounds: (a) market makers hedge whether or not the pattern is known to other participants; (b) the mechanism has survived in the options literature for 15+ years without visible decay; (c) held-out chronological validation across a 50/50 split (`grid_search_validation.py`) shows 0 of 31 confirmed symbols lose significance out of sample. The project operationalizes this hypothesis through a layered statistical framework, a two-layer symbol-ranking system, an AI analytical layer (Anthropic Claude Fable 5, referred to throughout as the **SOUL**) that consumes the per-symbol payload and produces ranked trading decisions under an explicit rule hierarchy, and two parallel trading approaches currently running a head-to-head empirical bake-off. The first *live-money* cycle (April 2026 OpEx) closed 11 stock positions with realized P&L of **+$1,761** (9 winners, 2 losers; hit rate 82%). Both losers were energy-sector regime casualties of the April 8 2026 US-Iran oil truce (XOM −6.88%, XLE −5.07%) — failures of environment, not of the mechanic. Concurrently, 23 *paper-evaluated* credit-spread recommendations from the Original system closed for the same OpEx, and 40 *paper-evaluated* spread trades from the Score system remain open for the May 15 OpEx. The May and June 2026 cycles will provide the first comparable evidence between the two parallel approaches; the resulting post-mortem cross-tabs will drive the decision about which components of each system — or which combination — survive into a merged production book.
 
 ## Operator profile and objective function
 
@@ -20,7 +20,7 @@ The system is DB-centric. All per-day data lives in a local SQLite database (`~/
 - **Dividend calendar** — yfinance (drives the skip-dividend logic).
 - **Historical options (GLD / SLV long history)** — Alpha Vantage archive (subscription cancelled May 2026; local archive retained).
 - **Scan candidates** — ThinkorSwim sizzle-index CSV exports dropped into `data/scans/`.
-- **AI analytical output** — Anthropic Claude Sonnet 4 API (`claude-sonnet-4-20250514`), called once per Final Analysis run.
+- **AI analytical output** — Anthropic Claude Fable 5 API (`claude-fable-5`), called once per Final Analysis run.
 
 ### Cron schedule (America/New_York)
 
@@ -147,7 +147,7 @@ The entire selection pipeline — from candidate CSV ingestion to ranked recomme
 
 ## The AI analytical layer — SOUL
 
-The quantitative pipeline produces a structured per-symbol payload. An Anthropic Claude Sonnet 4 API call — known internally as the **SOUL** — consumes that payload and produces the final human-readable trading recommendation. The SOUL is not a black-box ranker; it is a constrained reasoning layer operating under an explicit rule hierarchy with audit-logged outputs.
+The quantitative pipeline produces a structured per-symbol payload. An Anthropic Claude Fable 5 API call — known internally as the **SOUL** — consumes that payload and produces the final human-readable trading recommendation. The SOUL is not a black-box ranker; it is a constrained reasoning layer operating under an explicit rule hierarchy with audit-logged outputs.
 
 ### Input payload (per symbol)
 
@@ -333,7 +333,7 @@ The thesis is non-trivial to falsify and the system is non-trivial to defend. Th
 - **Config B** — canonical D-6 → D-3 event window used across the event study, ranking, and live signals.
 - **Layer 1** — static symbol ranking (`rank_score` on `symbol_stats`), recomputed only when the universe changes.
 - **Layer 2** — per-cycle ranking adjustment (`cycle_score` on `cycle_signals`), recomputed at each monitor run.
-- **SOUL** — the Anthropic Claude Sonnet analytical prompt producing the Final Analysis output.
+- **SOUL** — the Anthropic Claude Fable 5 analytical prompt producing the Final Analysis output.
 - **BH-FDR** — Benjamini-Hochberg false discovery rate correction.
 - **Bonferroni** — family-wise error rate correction (α / N).
 - **Bootstrap 95% CI (BCa)** — bias-corrected-and-accelerated non-parametric confidence interval on mean return.

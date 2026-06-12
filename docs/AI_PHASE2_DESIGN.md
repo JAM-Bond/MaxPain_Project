@@ -96,11 +96,11 @@ CREATE TABLE ai_pre_cycle_cache (
 
 ## 5. Cost & cadence
 
-Per fresh run: ~$0.10 (4K SOUL system, 3K user bundle, 3K output, Opus 4.7).
+Per fresh run: ~$0.22 (4K SOUL system, 3K user bundle, 3K output, Fable 5 @ $10/$50 per Mtok in/out → $0.07 input + $0.15 output).
 Per cached run: $0.
 Anthropic prompt cache (5-min TTL) reduces SOUL cost for back-to-back calls.
 
-Expected fire frequency: cron fires weekdays but commentary only generates when verdicts include GO/DOWNSIZE. Realistic: 6–15 fires per OpEx cycle (one per ticker-day during the 12 trading-day entry window). Monthly cost ceiling: ~$1.50.
+Expected fire frequency: cron fires weekdays but commentary only generates when verdicts include GO/DOWNSIZE. Realistic: 6–15 fires per OpEx cycle (one per ticker-day during the 12 trading-day entry window). Monthly cost ceiling: ~$3.30 (15 fires × $0.22).
 
 ---
 
