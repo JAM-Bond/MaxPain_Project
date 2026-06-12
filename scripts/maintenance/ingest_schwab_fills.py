@@ -12,9 +12,15 @@ to now; INSERT OR IGNORE makes the overlap harmless. First run uses --lookback
 (default 90 days). Fail-soft: a Schwab outage logs and exits non-zero without
 corrupting the table.
 
-NOTE: this ingests the raw fills + fees. Matching fills to spread_score_trades
-rows (auto-close + position-level P/L) is the next layer — built once real option
-fills exist to validate against (the live account is currently all CDs/T-bills).
+After ingesting, fills are matched to `spread_score_trades` via
+lib/fills_ledger_match (go-live audit F5): clean opens AUTO-CREATE a live
+ledger row (account='live'), clean closes auto-close it, already-recorded
+trades just get linked, and anything ambiguous is flagged loudly every run
+until resolved. This is what keeps a live position from running dark the way
+the HCA bull_put did 6/09→6/12.
+
+Runs intraday (10:00/12:00/14:00/16:22 ET) since 2026-06-12 — read-only API,
+idempotent, so frequency only shrinks the detection window.
 
 Usage:
   python3.11 -m scripts.maintenance.ingest_schwab_fills            # incremental
@@ -90,6 +96,20 @@ def main() -> int:
         print(f"ingest_schwab_fills: window {start[:10]}..{end[:10]} | "
               f"{len(txns)} txns ({skipped} non-instrument) → {n_new} new fills "
               f"({opt} option legs); {total} total in schwab_fills")
+
+        # F5: match option fills → ledger rows so live positions never run
+        # dark. Loud failure (exit 1 → cron email): a broken matcher must not
+        # silently leave a live position untracked.
+        from lib.fills_ledger_match import match_fills_to_ledger, render_summary
+        result = match_fills_to_ledger(conn)
+        summary = render_summary(result)
+        if summary:
+            print("fills→ledger match:")
+            print(summary)
+        if result["flagged"]:
+            print(f"ingest_schwab_fills: {len(result['flagged'])} UNRESOLVED "
+                  f"fill group(s) — exiting 1 so cron alerts until handled")
+            return 1
         return 0
     finally:
         conn.close()

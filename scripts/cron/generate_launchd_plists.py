@@ -50,7 +50,6 @@ WEEKDAY_JOBS = [
     ("orats_health",            19, 40, f"cd {ROOT} && {PY} scripts/maintenance/orats_health_check.py"),  # after 19:00 ingest; 10:00 false-alarmed daily (ORATS is T+1)
     ("close_prices",            16, 16, f"cd {ROOT} && {PY} scripts/pipeline/update_close_prices.py"),
     ("mark_open_spreads",       16, 20, f"cd {ROOT} && {PY} scripts/pipeline/mark_open_spreads.py"),
-    ("ingest_schwab_fills",     16, 22, f"cd {ROOT} && {PY} -m scripts.maintenance.ingest_schwab_fills"),  # EOD fills/P&L/fees from Schwab Trader API (idempotent; no-op until live option fills)
     ("reconcile_qualifier",     16, 25, f"cd {ROOT} && {PY} scripts/postmortem/reconcile_qualifier_links.py"),
     ("refresh_breadth_ring",    16, 30, f"cd {ROOT} && {PY} scripts/pipeline/refresh_breadth_ring.py"),  # breadth_live + RSP/SPY ring, before the 16:45 alert reads it
     ("ev_enrich",               16, 35, f"cd {ROOT} && {PY} -m lib.ev_enrich"),  # persist EV-rank before the 16:45 alert reads it
@@ -61,6 +60,17 @@ WEEKDAY_JOBS = [
     ("auto_promotion_liquidity",22, 30, f"cd {ROOT} && {PY} -m scripts.maintenance.auto_promotion_liquidity_scan"),
     ("auto_promotion_nightly",  22, 35, f"cd {ROOT} && {PY} -m scripts.maintenance.auto_promotion_nightly"),
     ("stop_profile_ensure",     22, 40, f"cd {ROOT} && {PY} -m lib.ticker_stop_profile --ensure-cohort"),  # fill stop profiles for newly-promoted cohort names
+]
+
+# Weekday jobs that fire at MULTIPLE times per day. (job_key, [(hh, mm), ...], command)
+# ingest_schwab_fills runs intraday since 2026-06-12 (go-live audit F5): the
+# HCA live trade ran dark 3 days because fills only landed at EOD and nothing
+# matched them to the ledger. Read-only API + idempotent upsert + the
+# fills→ledger matcher → frequency only shrinks the dark window (≤2h).
+# Heartbeat no-show coverage keys on the LAST run of the day (16:22).
+WEEKDAY_MULTI_JOBS = [
+    ("ingest_schwab_fills", [(10, 0), (12, 0), (14, 0), (16, 22)],
+     f"cd {ROOT} && {PY} -m scripts.maintenance.ingest_schwab_fills"),
 ]
 
 # Quarterly: 5th of Jan/Apr/Jul/Oct at 06:00. (job_key, months, day, hour, minute, command)
@@ -150,6 +160,13 @@ def main() -> None:
     written = []
     for job, hh, mm, cmd in WEEKDAY_JOBS:
         d = build(job, weekday_intervals(hh, mm), cmd)
+        p = OUT_DIR / f"com.maxpain.{job}.plist"
+        with open(p, "wb") as f:
+            plistlib.dump(d, f)
+        written.append(p.name)
+    for job, times, cmd in WEEKDAY_MULTI_JOBS:
+        intervals = [iv for hh, mm in times for iv in weekday_intervals(hh, mm)]
+        d = build(job, intervals, cmd)
         p = OUT_DIR / f"com.maxpain.{job}.plist"
         with open(p, "wb") as f:
             plistlib.dump(d, f)
