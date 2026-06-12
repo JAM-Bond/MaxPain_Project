@@ -189,6 +189,12 @@ def _zebra_metrics(pos, chain=None) -> dict:
             "entry": f"${debit:.2f} debit",
             "stop": None,
             "aside": None,
+            "discipline": [
+                f"Max loss ${debit*100:.0f} = debit (defined) · size 5–10% of book equity",
+                # 3.5% mirrors ZEBRA_STOP_LOSS_PCT in daily_alert.py (not
+                # imported here to avoid a circular import; policy text only).
+                "Held to OpEx, no managed exit · 3.5% spot stop-loss (alert monitors daily)",
+            ] + ([f"⚠ {liq_warn}"] if liq_warn else []),
         },
     }
 
@@ -243,6 +249,10 @@ def _anti_zebra_metrics(pos, chain=None) -> dict:
             "entry": f"${debit:.2f} debit",
             "stop": None,
             "aside": None,
+            "discipline": [
+                f"Max loss ${debit*100:.0f} = debit (defined) · size 5–10% of book equity",
+                "H1 gate must be active at entry (bearish synthetic short)",
+            ] + ([f"⚠ {liq_warn}"] if liq_warn else []),
         },
     }
 
@@ -315,6 +325,11 @@ def _inverted_fly_metrics(pos, chain=None) -> dict:
             "entry": f"${debit:.2f} debit",
             "stop": None,
             "aside": "build as Iron Condor, then adjust to fly",
+            "discipline": [
+                f"Max loss ${debit*100:.0f} = debit (defined)"
+                f" · max profit/side ${max_profit_per_side*100:.0f}",
+                "Exit: 50%-of-max ONLY — no 21-DTE stop, no stop-loss (validated rule)",
+            ] + ([f"⚠ {liq_warn}"] if liq_warn else []),
         },
     }
 
@@ -412,6 +427,19 @@ def _vertical_metrics(pos, kind: str, chain=None, symbol: str = "") -> dict:
                      f"LMT {stop_limit:.2f}",
                      "MARK GTC"),
             "aside": None,
+            # Discipline lines (go-live audit C3): the compact-card redesign
+            # had orphaned the C/W floor, max loss, T-21 and liquidity
+            # content into unrendered keys — these ARE rendered.
+            "discipline": [
+                (f"C/W {credit/wing:.2f} "
+                 f"{'PASS' if credit/wing >= G.MIN_CREDIT_WIDTH else '⚠ FAIL'}"
+                 f" (floor {G.MIN_CREDIT_WIDTH:.2f})"
+                 f" · max loss ${max_loss*100:.0f} (defined)"),
+                "Exit: 50% capture target · T-21 time exit (close/roll regardless of capture)",
+            ] + ([f"⚠ natural-worst ${natural_credit:.2f} < floor ${floor_credit:.2f} "
+                  f"— patient limit only; skip if a ≥-floor fill won't come"]
+                 if natural_credit is not None and natural_credit < floor_credit else [])
+              + ([f"⚠ {liq_warn}"] if liq_warn else []),
         },
     }
 
@@ -463,6 +491,8 @@ def _render_text(symbol: str, structure: str, expiry: str, spot: float, m: dict)
     if c.get("stop"):
         stp, lmt, mark = c["stop"]
         lines.append(f"    Stop:  {stp}  /  {lmt}  ({mark})")
+    for d in c.get("discipline") or []:
+        lines.append(f"    {d}")
     return "\n".join(lines)
 
 
@@ -478,6 +508,10 @@ def _render_html(symbol: str, structure: str, expiry: str, spot: float, m: dict)
         stp, lmt, mark = c["stop"]
         stop_html = (f"<div><b>Stop:</b> &nbsp;{stp} &nbsp;/&nbsp; {lmt} "
                      f"&nbsp;<span style='color:#888'>({mark})</span></div>")
+    discipline_html = ""
+    for d in c.get("discipline") or []:
+        color = "#a00" if d.startswith("⚠") or "FAIL" in d else "#555"
+        discipline_html += (f"<div style='font-size:12px;color:{color}'>{d}</div>")
     return f"""
 <div style="font-family:Menlo,Consolas,monospace;border:1px solid #ccc;padding:10px;margin:8px 0;background:#fafafa">
   <div style="font-weight:bold;margin-bottom:4px">{symbol} &nbsp; {structure} &nbsp; {_fmt_expiry(expiry)}</div>
@@ -485,6 +519,7 @@ def _render_html(symbol: str, structure: str, expiry: str, spot: float, m: dict)
   <div><b>Legs:</b> &nbsp;{legs_text}</div>
   <div><b>Entry:</b> &nbsp;{c['entry']}</div>
   {stop_html}
+  {discipline_html}
 </div>
 """
 

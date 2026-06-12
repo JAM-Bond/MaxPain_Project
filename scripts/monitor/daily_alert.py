@@ -670,16 +670,20 @@ def detect_dte_checkpoints(positions: pd.DataFrame, conn) -> list[str]:
                 )
             if s and s.get("pct") is not None and not s.get("stale"):
                 pct = s["pct"]
+                # Always show the mark date the % is computed from (go-live
+                # audit D4): a 1-day-old mark passes the staleness gate but
+                # the user should see which close it reflects.
+                mark_tag = f" (mark {s['mark_date']})" if s.get("mark_date") else ""
                 if pct >= 80:
                     actionable.append(
                         f"🎯 {sym} {struct} K={sk_str} {suffix}: "
-                        f"{pct:.0f}% CREDIT CAPTURED — Sosnoff 80% target HIT"
+                        f"{pct:.0f}% CREDIT CAPTURED — Sosnoff 80% target HIT{mark_tag}"
                     )
                     profit_alerted = True
                 elif pct >= 50:
                     actionable.append(
                         f"💰 {sym} {struct} K={sk_str} {suffix}: "
-                        f"{pct:.0f}% credit captured — TastyTrade 50% rule eligible"
+                        f"{pct:.0f}% credit captured — TastyTrade 50% rule eligible{mark_tag}"
                     )
                     profit_alerted = True
 
@@ -715,8 +719,13 @@ def detect_dte_checkpoints(positions: pd.DataFrame, conn) -> list[str]:
                 src_note = ""
                 if sl.get("entry_source_date") and str(p.get("entry_date"))[:10] != sl["entry_source_date"]:
                     src_note = f" [entry spot from {sl['entry_source_date']} snapshot]"
+                # Always show which snapshot date the CURRENT spot came from
+                # (go-live audit D4): the latest live_snapshots row can be
+                # older than today; a stop decision must show its data's age.
+                cur_note = (f" [spot as of {sl['current_source_date']}]"
+                            if sl.get("current_source_date") else "")
                 actionable.append(
-                    f"🛑 {sym} {struct} {suffix}: STOP-LOSS — spot ${sl['cur_spot']:.2f} "
+                    f"🛑 {sym} {struct} {suffix}: STOP-LOSS — spot ${sl['cur_spot']:.2f}{cur_note} "
                     f"vs entry ${sl['entry_spot']:.2f} (-{sl['pct_drop']*100:.1f}%) — "
                     f"CLOSE POSITION (≥{ZEBRA_STOP_LOSS_PCT*100:.1f}% rule){src_note}"
                 )
@@ -1106,6 +1115,19 @@ ENTRY_WINDOW_LEAD_DAYS = 3  # fire alert from D-3 through entry day (gives ~2 tr
                              # of evaluation + modeling + order-setup time per user spec)
 
 
+def _qualifier_slate_warning(run_date_str: str) -> str | None:
+    """Stale-slate banner (go-live audit D4): the alert renders whatever
+    MAX(run_date) holds. If the 9:25 qualifier cron stalls, that's an OLD
+    slate whose stored days_until ("entry TODAY") no longer means today —
+    never render it without a banner."""
+    if run_date_str == date.today().isoformat():
+        return None
+    return (f"⚠ QUALIFIER SLATE IS STALE — verdicts below are from "
+            f"{run_date_str}, not today. The 9:25 qualifier cron may have "
+            f"failed; entry-day timing ('TODAY'/'TOMORROW') is unreliable. "
+            f"Re-run the qualifier before acting.")
+
+
 def detect_entry_windows(conn) -> list[str]:
     """Fire when GO/PENDING qualifier verdicts have days_until ≤ ENTRY_WINDOW_LEAD_DAYS.
     Covers BOTH Window A (45-DTE managed) and Window B (T-5 / MaxPain) with the same
@@ -1125,7 +1147,7 @@ def detect_entry_windows(conn) -> list[str]:
         SELECT symbol, structure, window, target, opex, days_until, verdict, reason
         FROM cycle_qualifier_runs
         WHERE run_date = '{run_date}'
-          AND verdict IN ('GO', 'DOWNSIZE', 'PENDING')
+          AND verdict IN ('GO', 'DOWNSIZE', 'PENDING', 'SKIP_CONCENTRATION')
           AND days_until <= {ENTRY_WINDOW_LEAD_DAYS}
         ORDER BY days_until, opex, window, verdict, symbol
     """, conn)
@@ -1134,6 +1156,9 @@ def detect_entry_windows(conn) -> list[str]:
         return []
 
     events = []
+    stale_banner = _qualifier_slate_warning(run_date)
+    if stale_banner:
+        events.append(stale_banner)
     for (window, opex, target), grp in df.groupby(["window", "opex", "target"]):
         days_until = int(grp["days_until"].iloc[0])
         if days_until == 0:
@@ -1149,6 +1174,8 @@ def detect_entry_windows(conn) -> list[str]:
         go_names = sorted(grp[grp["verdict"] == "GO"]["symbol"].unique().tolist())
         ds_names = sorted(grp[grp["verdict"] == "DOWNSIZE"]["symbol"].unique().tolist())
         pending_n = (grp["verdict"] == "PENDING").sum()
+        capped_names = sorted(
+            grp[grp["verdict"] == "SKIP_CONCENTRATION"]["symbol"].unique().tolist())
 
         header = (f"{sev} {window}  →  entry {target} ({band})  ·  OpEx {opex}")
 
@@ -1159,6 +1186,12 @@ def detect_entry_windows(conn) -> list[str]:
             lines.append(f"     DOWNSIZE ({len(ds_names)}): {', '.join(ds_names)}")
         if pending_n > 0:
             lines.append(f"     PENDING: {pending_n} more (gates may flip — check qualifier output)")
+        if capped_names:
+            # Names that qualified on every gate but were cut by the
+            # concentration cap-ranking — shown so the cut is never silent
+            # (go-live audit F3).
+            lines.append(f"     CAPPED OUT ({len(capped_names)}): "
+                         f"{', '.join(capped_names)} (concentration cap — see qualifier reasons)")
 
         events.append("\n  ".join(lines))
 
@@ -1404,12 +1437,18 @@ def build_construction_enrichment(conn, close_candidate_symbols=None) -> tuple[s
     if df.empty:
         return "", []
 
+    # Stale-slate guard (go-live audit D4): these are days_until<=1 "entry
+    # TODAY" cards — the most dangerous thing to render from an old run.
+    stale_banner = _qualifier_slate_warning(latest[0])
+
     # Lazy import — only when actionable rows exist (saves cron startup time)
     from scripts.monitor.trade_construction import (
         build_construction_block, build_zebra_with_overlay_block,
     )
     from scripts.monitor.zebra_overlay_rule import regime_overlay_rule
-    from scripts.qualifier.gate_config import COHORT_ZEBRA_OVERLAY_AUTO
+    from scripts.qualifier.gate_config import (
+        COHORT_ZEBRA_OVERLAY_AUTO, SECTOR_CAP_MAX_PER_OPEX,
+    )
     from lib.sector_map import ETF_SENTINEL, UNKNOWN_SENTINEL
 
     # Compute the overlay rule once per alert run — shared across all ZEBRA
@@ -1441,6 +1480,14 @@ def build_construction_enrichment(conn, close_candidate_symbols=None) -> tuple[s
 
     text_parts = []
     html_parts = []
+    if stale_banner:
+        text_parts.append(f"  {stale_banner}")
+        text_parts.append("")
+        html_parts.append(
+            f"<div style='font-size:13px;color:#a00;margin:4px 0 12px 0;"
+            f"padding:6px 10px;background:#fdecea;border-left:3px solid #a00'>"
+            f"<b>{stale_banner}</b></div>"
+        )
     for _, r in df.iterrows():
         # Earnings rows have opex = "(earnings-anchored)" — skip these for
         # construction (need real expiration). Earnings track gets its own
@@ -1454,10 +1501,11 @@ def build_construction_enrichment(conn, close_candidate_symbols=None) -> tuple[s
         if sector not in (ETF_SENTINEL, UNKNOWN_SENTINEL, None):
             key = (r["opex"], sector)
             sector_count[key] = sector_count.get(key, 0) + 1
-            if sector_count[key] == 2:
+            if sector_count[key] == SECTOR_CAP_MAX_PER_OPEX:
                 sector_warning = (
-                    f"  ⚠ SECTOR-LOAD: 2nd {sector} entry for OpEx {r['opex']} "
-                    f"— at the per-sector cap (max {2} per GICS sector)"
+                    f"  ⚠ SECTOR-LOAD: {sector} entry #{sector_count[key]} for "
+                    f"OpEx {r['opex']} — at the per-sector cap "
+                    f"(max {SECTOR_CAP_MAX_PER_OPEX} per GICS sector)"
                 )
 
         result = build_construction_block(r["symbol"], r["structure"], r["opex"])
@@ -1970,6 +2018,27 @@ def main():
     except Exception as e:
         print(f"  ⚠ close_helper enrichment failed: {e}")
 
+    # LIVE BOOK RECONCILIATION (go-live audit F5) — real broker option
+    # positions vs open account='live' ledger rows. Renders ONLY when the two
+    # disagree: a live position the ledger doesn't know (running dark) or a
+    # ledger row the broker no longer holds. Quiet when clean (the ✓ goes to
+    # the cron log via _real_stdout). Soft-fail: never break the alert.
+    live_book_warnings: list[str] = []
+    try:
+        from lib.live_book_reconcile import reconcile as _live_reconcile
+        with redirect_stdout(_real_stdout):   # token chatter → cron log only
+            live_book_warnings = _live_reconcile(conn)
+        if live_book_warnings:
+            print(f"\n  LIVE BOOK RECONCILIATION — broker vs ledger MISMATCH")
+            print(f"  {'-'*68}")
+            for w in live_book_warnings:
+                print(f"  {w}")
+        else:
+            with redirect_stdout(_real_stdout):
+                print("  ✓ live book reconciliation clean (broker == ledger)")
+    except Exception as e:
+        print(f"  ⚠ live book reconciliation failed: {e}")
+
     # DOWNSIZE CANDIDATES — (A) new entries the qualifier flagged half-size +
     # (B) open long-delta positions to trim under elevated risk. Each ticker
     # carries a brief reason. Names already in CLOSE CANDIDATES are excluded
@@ -2009,7 +2078,7 @@ def main():
             and not extreme_events and not dte_events
             and not zebra_earnings_events and not regime_health_lines
             and not psych_gap_text and not construction_text
-            and not downsize_text):
+            and not downsize_text and not live_book_warnings):
         print(f"\n  ✓ All quiet — no alerts.")
 
     if construction_text:
