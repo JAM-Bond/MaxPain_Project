@@ -248,6 +248,11 @@ MAX_SPOT_ZEBRA = 100.0
 # project_universe_expansion_v3.md and feedback_expensive_names_verticals_only.md.
 MAX_SPOT_INVERTED_FLY = 300.0
 
+# anti_zebra spot cap (C5, 2026-06-12). Same $300 ceiling as IF — a debit
+# structure with no overlay capping its tail — but a distinct constant so the
+# two caps can move independently.
+MAX_SPOT_ANTI_ZEBRA = 300.0
+
 # ZEBRA persistence-trend filter (added 2026-05-03).
 # A delta-1 stock-replacement structure shouldn't fire on a name that has been
 # in a sustained downtrend. The v2 pre-reg's own lesson learned: "binding
@@ -304,6 +309,10 @@ BUDGET_CAPS = {
     "inverted_fly_pair": MAX_SPOT_INVERTED_FLY,
     "inverted_fly_single": MAX_SPOT_INVERTED_FLY,
     "inverted_fly_earnings": MAX_SPOT_INVERTED_FLY,
+    # anti_zebra is a capital-outlay (debit) structure like ZEBRA but has no
+    # long-put overlay capping its tail, so it keeps the $300 spot cap (C5,
+    # 2026-06-12). Mirrors the IF cap rationale: reserve for sub-cap names.
+    "anti_zebra": MAX_SPOT_ANTI_ZEBRA,
 }
 
 
@@ -397,6 +406,21 @@ SECTOR_CAP_MAX_PER_OPEX = 2
 # logs a warning if the invariant is violated.
 
 MACRO_CAP_MAX_PER_OPEX = 3
+
+
+# ─── Correlated-slot groups (F3, 2026-06-12) ──────────────────────────
+#
+# Names that are effectively ONE bet despite being distinct tickers — tighter
+# than the macro regime_primary bucket (which is a coarse factor descriptor).
+# When >=2 members of a group are actionable in the SAME OpEx, they share a
+# single risk slot: apply_correlated_slot_cap DOWNSIZES every member to half so
+# the combined exposure ~= one full position ("size both half, or pick one").
+# Unlike the macro cap, this keeps NO full-size winner — the members are not two
+# independent risks at all. PDD/BABA are the founding case (China ADR beta to
+# the same policy/FX shock; see project_session_20260612_pm_handoff IF slate).
+CORRELATED_SLOT_GROUPS = {
+    "china_adr": ["PDD", "BABA"],
+}
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────

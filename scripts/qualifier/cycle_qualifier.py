@@ -361,6 +361,18 @@ def evaluate_opex_cell(symbol: str, structure: str, window_label: str,
     # (no skip) when ORATS history is missing — the v1 cohort uses the
     # research_cohort_v15 parquet which may not have all symbols.
     if structure.startswith("zebra"):
+        # C1c (2026-06-12): no NEW zebra once the regime leaves calm (stage >= 1).
+        # ZEBRA is a delta-1 bull stock-replacement; opening fresh long-delta
+        # exposure into a defensive regime contradicts plan v2.5. anti_zebra is
+        # EXEMPT — it's the bearish mirror, H1-gated separately, and is not
+        # caught here since "anti_zebra" does not start with "zebra".
+        stage = regime.get("stage")
+        if stage is not None and stage >= 1:
+            row["verdict"] = G.VERDICT_SKIP
+            row["reason"] = (
+                f"regime stage {stage} (>=1) — no new ZEBRA outside calm regime [C1c]"
+            )
+            return row
         trend = zebra_trend_status(symbol)
         if trend is not None and trend["sustained_downtrend"]:
             row["verdict"] = G.VERDICT_SKIP
@@ -441,11 +453,22 @@ def evaluate_opex_cell(symbol: str, structure: str, window_label: str,
         )
         return row
 
-    # 4. GO — but check soft-downsize for sizing
-    if regime.get("soft_downsize_active") and structure.startswith("bull_put"):
+    # 4. GO — but check sizing triggers for bull_put.
+    #   soft_downsize_active → Stage-1 early caution (half size).
+    #   below_200dma         → Stage-2 (SPY below its 200-DMA): plan v2.5 mandates
+    #     50% for bull_put here (C1b, 2026-06-12). The system formerly ran full
+    #     size in Stage 2 — a divergence more permissive than plan. (The full
+    #     hard-pause case — below_200dma + term_inv + IVR>0.5 — already PAUSED
+    #     bull_put at step 1; this catches the milder Stage-2 regime.)
+    bp = structure.startswith("bull_put")
+    if bp and regime.get("soft_downsize_active"):
         row["verdict"] = G.VERDICT_DOWNSIZE
         row["size"] = G.SIZE_DOWNSIZE
         row["reason"] = "GO at half size (soft-downsize trigger active)"
+    elif bp and regime.get("below_200dma"):
+        row["verdict"] = G.VERDICT_DOWNSIZE
+        row["size"] = G.SIZE_DOWNSIZE
+        row["reason"] = "GO at half size (Stage 2: SPY below 200-DMA)"
     elif structure in G.PAPER_SIZED_STRUCTURES:
         row["verdict"] = G.VERDICT_GO
         row["size"] = G.PAPER_SIZE_FACTOR
@@ -625,11 +648,14 @@ def build_opex_verdicts(regime: dict, windows: dict, run_date: date,
 
 def evaluate_earnings_cell(symbol: str, structure: str, earnings_date: date,
                             run_date: date, days_before: int,
-                            spots: dict[str, float] | None = None) -> dict:
+                            spots: dict[str, float] | None = None,
+                            regime: dict | None = None) -> dict:
     """Earnings-track verdict: GO if today is exactly T-N before earnings,
     PENDING if upcoming within tolerance window, SKIP otherwise.
 
-    Earnings track is calendar-driven (no regime gate per plan v1.7).
+    Earnings track is calendar-driven (no regime *entry* gate per plan v1.7),
+    BUT bull_put_earnings still respects the hard-pause regime (C5) — see the
+    elif chain below.
     """
     target = trading_day_offset(earnings_date, -days_before)
     # Calendar comparison for past/future (trading_days_between sign is
@@ -660,6 +686,14 @@ def evaluate_earnings_cell(symbol: str, structure: str, earnings_date: date,
     if target < run_date:
         row["verdict"] = G.VERDICT_SKIP
         row["reason"] = f"target {target} already past"
+    elif (structure == "bull_put_earnings" and regime
+          and regime.get("hard_pause_active")):
+        # C5 (2026-06-12): evaluate_opex_cell's hard-pause check explicitly
+        # excludes _earnings structures, so the earnings track was opening
+        # short-put risk into a confirmed bear regime. Plan v2.5: no new
+        # bull_put of any flavor under hard pause.
+        row["verdict"] = G.VERDICT_PAUSE
+        row["reason"] = "hard pause active (SPY<200dma + term_inv + IVR>0.5) [C5]"
     elif days_until > 5:
         row["verdict"] = G.VERDICT_SKIP
         row["reason"] = f"earnings {earnings_date} too far ({days_until} td)"
@@ -679,8 +713,13 @@ def evaluate_earnings_cell(symbol: str, structure: str, earnings_date: date,
 
 
 def build_earnings_verdicts(run_date: date,
-                             spots: dict[str, float] | None = None) -> list[dict]:
-    """Look up upcoming earnings for the three earnings cohorts and emit verdicts."""
+                             spots: dict[str, float] | None = None,
+                             regime: dict | None = None) -> list[dict]:
+    """Look up upcoming earnings for the three earnings cohorts and emit verdicts.
+
+    `regime` is used only for the bull_put_earnings hard-pause check (C5); the
+    earnings track is otherwise calendar-driven.
+    """
     all_earnings_names = sorted(set(
         G.COHORT_EARNINGS_BULL_PUT
         + G.COHORT_EARNINGS_BEAR_CALL
@@ -701,7 +740,7 @@ def build_earnings_verdicts(run_date: date,
                            if sym in G.EARNINGS_T1_NAMES
                            else G.WINDOW_EARNINGS_T3)
             rows.append(evaluate_earnings_cell(
-                sym, "bull_put_earnings", ed, run_date, days_before, spots
+                sym, "bull_put_earnings", ed, run_date, days_before, spots, regime
             ))
 
         # INTC bear_call earnings (T-1)
@@ -1083,6 +1122,66 @@ def apply_macro_concentration_cap(rows: list[dict], ev_cache: dict | None = None
     return rows
 
 
+def apply_correlated_slot_cap(rows: list[dict]) -> list[dict]:
+    """Shared-slot downsize for tightly-correlated name groups (F3).
+
+    G.CORRELATED_SLOT_GROUPS names (e.g. China ADRs PDD/BABA) are effectively
+    one bet. When >=2 distinct members of a group are actionable in the SAME
+    OpEx, every member is DOWNSIZED to G.SIZE_DOWNSIZE so the combined position
+    is ~= one full slot — "size both half, or pick one." Tighter than the macro
+    cap: it keeps NO full-size winner because the members are not independent
+    risks. A single member actionable in two structures does NOT trigger it
+    (the trigger counts distinct symbols, not rows).
+
+    Earnings-anchored rows are excluded (different time bucket). Runs AFTER the
+    sector and macro caps so it only re-sizes still-actionable rows. Mutates in
+    place; returns the same list.
+    """
+    actionable_set = (G.VERDICT_GO, G.VERDICT_DOWNSIZE)
+    groups = getattr(G, "CORRELATED_SLOT_GROUPS", {}) or {}
+    sym_group = {s: label for label, members in groups.items() for s in members}
+    if not sym_group:
+        return rows
+
+    buckets: dict[tuple, list[dict]] = {}
+    for r in rows:
+        if r.get("verdict") not in actionable_set:
+            continue
+        g = sym_group.get(r.get("symbol", ""))
+        if g is None:
+            continue
+        opex = r.get("opex")
+        if not opex or "earnings" in str(opex):
+            continue
+        buckets.setdefault((g, opex), []).append(r)
+
+    n_capped = 0
+    for (g, opex), bucket in buckets.items():
+        syms = sorted({r["symbol"] for r in bucket})
+        if len(syms) < 2:
+            continue
+        peers = ", ".join(syms)
+        slot_note = (
+            f"correlated-slot cap fired ({g}: {peers} share one slot — "
+            f"size both half or pick one)"
+        )
+        for r in bucket:
+            if r["verdict"] == G.VERDICT_GO:
+                r["verdict"] = G.VERDICT_DOWNSIZE
+                r["size"] = G.SIZE_DOWNSIZE
+            # already-DOWNSIZE rows keep their (already-reduced) size
+            r["reason"] = (
+                (r.get("reason") + " | " + slot_note) if r.get("reason")
+                else slot_note
+            )
+            n_capped += 1
+
+    if n_capped:
+        log.info("Correlated-slot cap downsized %d row(s) for shared-slot concentration",
+                 n_capped)
+    return rows
+
+
 # ─── Persistence ──────────────────────────────────────────────────────
 
 QUALIFIER_COLUMNS = [
@@ -1190,13 +1289,15 @@ def main():
     windows = compute_window_targets(run_date)
     earnings_by_sym, earnings_failed = load_cohort_earnings(run_date)
 
-    # Live spots for the budget-cap gate (ZEBRA + IF only). Single bulk call.
+    # Live spots for the budget-cap gate (ZEBRA + IF + anti_zebra). Single bulk
+    # call. anti_zebra added 2026-06-12 (C5) — it now carries a $300 spot cap.
     budget_gated_syms = sorted(set(
         G.COHORT_ZEBRA_TIER1
         + G.COHORT_ZEBRA_TIER2
         + G.COHORT_INVERTED_FLY_PAIR
         + G.COHORT_INVERTED_FLY_SINGLE
         + G.COHORT_EARNINGS_INVERTED_FLY
+        + G.COHORT_ANTI_ZEBRA_TIER1
     ))
     spots = fetch_schwab_spots(budget_gated_syms)
 
@@ -1204,7 +1305,7 @@ def main():
         build_opex_verdicts(regime, windows, run_date, earnings_by_sym, spots)
         if regime else []
     )
-    earnings_rows = build_earnings_verdicts(run_date, spots)
+    earnings_rows = build_earnings_verdicts(run_date, spots, regime)
     verdict_rows = opex_rows + earnings_rows
 
     # Shared per-run chain cache for the EV-rank tiebreak inside both caps, so a
@@ -1219,6 +1320,11 @@ def main():
     # names per regime_primary bucket per OpEx). Orthogonal to the sector cap;
     # runs after it so it only re-sizes still-actionable rows.
     verdict_rows = apply_macro_concentration_cap(verdict_rows, ev_cache=ev_cache)
+
+    # Correlated-slot cap (F3): tightly-correlated groups (e.g. China ADRs
+    # PDD/BABA) share one risk slot — if >=2 members are actionable in the same
+    # OpEx, downsize all. Runs last so it sees the post-sector/macro set.
+    verdict_rows = apply_correlated_slot_cap(verdict_rows)
 
     # ── Fail-open visibility (go-live audit C5/F3) ────────────────────────
     # The earnings gate and the budget-cap gate silently disable themselves
