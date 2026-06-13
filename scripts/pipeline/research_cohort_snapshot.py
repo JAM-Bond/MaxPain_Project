@@ -196,8 +196,15 @@ def compute_regime_state(today: date) -> dict | None:
 
     # Soft-downsize: any of (IVR>0.7, |spy/ma200 - 1| <= 0.02 trending down,
     # term_inv AND VIX > 20).
+    # "Trending down" = negative 5-day return (C1a decision 2026-06-12): the
+    # old below_200dma proxy meant soft-downsize could only fire AFTER the
+    # break, when the plan's intent is to catch the approach to the line.
     near_ma200 = abs(pct_to_ma200) <= 0.02 if pct_to_ma200 is not None else False
-    trending_down = below_200dma  # simple proxy: actually below the line
+    if len(daily) >= 6 and pd.notna(daily["close"].iloc[-6]):
+        ret_5d = float(daily["close"].iloc[-1] / daily["close"].iloc[-6] - 1)
+    else:
+        ret_5d = None
+    trending_down = (ret_5d < 0) if ret_5d is not None else below_200dma
     if vix_value is not None:
         vix_high = vix_value > 20.0
     else:
