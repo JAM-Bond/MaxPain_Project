@@ -526,32 +526,27 @@ def _render_html(symbol: str, structure: str, expiry: str, spot: float, m: dict)
 
 # ─── Public entry point ───────────────────────────────────────────────
 
-def _moneyness_annotation(rec) -> tuple[str, str]:
-    """Return (text_line, html_line) describing the per-ticker moneyness pick."""
+# ─── Per-ticker discipline lines (Item 7) ─────────────────────────────
+# Compact one-liners folded into each card's compact.discipline list by
+# build_construction_block. They surface the per-ticker walk-forward picks
+# (moneyness / IF wing) and the bull_put MA-bucket warning that the qualifier's
+# Rule #1 acts on. Plain strings — _render_text/_render_html style them (a line
+# starting with ⚠ renders in warning color).
+
+def _moneyness_line(rec) -> str:
+    """One compact discipline line for the per-ticker moneyness pick."""
     if rec.is_default:
-        text = f"    Moneyness: {rec.label} (default — no walk-forward advantage)"
-        html = (f"<div style='font-size:12px;color:#888;margin-top:4px'>"
-                f"Moneyness: <b>{rec.label}</b> (default — no walk-forward advantage)</div>")
-        return text, html
-    p_str = f"train p={rec.train_p:.4f} (n={rec.train_n}), val p={rec.val_p:.4f} (n={rec.val_n})"
-    text = (f"    Moneyness: {rec.label} (per-ticker walk-forward: {rec.evidence_pair} → "
-            f"{rec.label} wins; {p_str})")
-    html = (f"<div style='font-size:12px;color:#1a6b1a;margin-top:4px'>"
-            f"Moneyness: <b>{rec.label}</b> (walk-forward validated: "
-            f"<i>{rec.evidence_pair}</i> → {rec.label} wins; {p_str})</div>")
-    return text, html
+        return f"Moneyness: {rec.label} (default — no walk-forward edge)"
+    return (f"Moneyness: {rec.label} (walk-forward validated: "
+            f"{rec.evidence_pair}; val p={rec.val_p:.3f} n={rec.val_n})")
 
 
-def _ma_bucket_annotation(symbol: str) -> Optional[tuple[str, str]]:
-    """Construction-block sibling of the qualifier's Rule #1 DOWNSIZE gate.
-
-    For bull_put* structures: when spot is below the 200-DMA by more than
-    G.BULL_PUT_BELOW_MA_DOWNSIZE_THRESHOLD (default -10%), render a warning
-    line surfacing the MA bucket inside the construction block. Silent
-    otherwise so the alert stays scannable.
-
-    Returns None when MA history is unavailable or the warning doesn't apply.
-    """
+def _ma_bucket_line(symbol: str) -> Optional[str]:
+    """Compact discipline line when a bull_put name sits more than
+    G.BULL_PUT_BELOW_MA_DOWNSIZE_THRESHOLD below its 200-DMA — the
+    construction-block sibling of the qualifier's Rule #1 DOWNSIZE gate.
+    Returns None when MA history is unavailable or the warning doesn't apply
+    (kept silent so the card stays scannable)."""
     from scripts.qualifier.cycle_qualifier import bull_put_ma_pct
     try:
         ma_pct = bull_put_ma_pct(symbol)
@@ -563,29 +558,18 @@ def _ma_bucket_annotation(symbol: str) -> Optional[tuple[str, str]]:
     if ma_pct >= threshold:
         return None
     bucket = f"BELOW_{int(abs(threshold)*100)}PCT"
-    text = (f"    MA bucket: {bucket} — spot {ma_pct*100:+.1f}% vs 200-DMA "
-            f"(Rule #1 DOWNSIZE: half-size)")
-    html = (f"<div style='font-size:12px;color:#a06400;margin-top:4px'>"
-            f"⚠ MA bucket: <b>{bucket}</b> — spot {ma_pct*100:+.1f}% vs 200-DMA "
-            f"(Rule #1 DOWNSIZE: half-size)</div>")
-    return text, html
+    return (f"⚠ MA bucket {bucket}: spot {ma_pct*100:+.1f}% vs 200-DMA "
+            f"(Rule #1 DOWNSIZE — half-size)")
 
 
-def _if_wing_annotation(rec) -> tuple[str, str]:
-    """Return (text_line, html_line) describing the per-ticker IF wing pick."""
+def _if_wing_line(rec) -> str:
+    """One compact discipline line for the per-ticker IF wing pick."""
     pct_label = f"{rec.wing_pct*100:.0f}%"
     if rec.is_default:
-        text = f"    Wing width: {rec.label} ({pct_label} of spot, default — no walk-forward advantage)"
-        html = (f"<div style='font-size:12px;color:#888;margin-top:4px'>"
-                f"Wing width: <b>{rec.label}</b> ({pct_label} of spot, default — no walk-forward advantage)</div>")
-        return text, html
-    p_str = f"train p={rec.train_p:.4f} (n={rec.train_n}), val p={rec.val_p:.4f} (n={rec.val_n})"
-    text = (f"    Wing width: {rec.label} ({pct_label} of spot — per-ticker walk-forward: "
-            f"{rec.evidence_pair} → {rec.label} wins; {p_str})")
-    html = (f"<div style='font-size:12px;color:#1a6b1a;margin-top:4px'>"
-            f"Wing width: <b>{rec.label}</b> ({pct_label} of spot — walk-forward validated: "
-            f"<i>{rec.evidence_pair}</i> → {rec.label} wins; {p_str})</div>")
-    return text, html
+        return (f"Wing width: {rec.label} ({pct_label} of spot, default — "
+                f"no walk-forward edge)")
+    return (f"Wing width: {rec.label} ({pct_label} of spot — walk-forward "
+            f"validated: {rec.evidence_pair}; val p={rec.val_p:.3f} n={rec.val_n})")
 
 
 def build_construction_block(
@@ -663,6 +647,20 @@ def build_construction_block(
                 f"Bull Put (MP-anchored, T-5) — put credit spread "
                 f"@ MP ${mp_value:.2f}, paper-test"
             )
+        # Item 7 (2026-06-12): fold the per-ticker walk-forward picks and the
+        # MA-bucket warning into the card's discipline block as compact
+        # one-liners (these helpers previously had zero callers). The ⚠ MA line
+        # goes last so it lands most-visible.
+        disc = m.get("compact", {}).get("discipline")
+        if disc is not None:
+            if rec is not None:
+                disc.append(_moneyness_line(rec))
+            if if_wing_rec is not None:
+                disc.append(_if_wing_line(if_wing_rec))
+            if structure.startswith("bull_put"):
+                ma_line = _ma_bucket_line(symbol)
+                if ma_line:
+                    disc.append(ma_line)
         text = _render_text(symbol, structure, expiry, spot, m)
         html = _render_html(symbol, structure, expiry, spot, m)
         return {"ok": True, "text": text, "html": html, "error": None}

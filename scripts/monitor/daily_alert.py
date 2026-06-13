@@ -1611,35 +1611,39 @@ def build_construction_enrichment(conn, close_candidate_symbols=None) -> tuple[s
         # Phase 1+2 validated: matched-expiry long put, strike by regime,
         # both legs held to OpEx. AUTO cohort sourced from
         # gate_config.COHORT_ZEBRA_OVERLAY_AUTO (tier-1 + tier-2 per-name).
+        # C1d (plan v2.5, 2026-06-12): EVERY ZEBRA carries a long-put overlay,
+        # so render the priced overlay for all zebra GO/DOWNSIZE rows. The basis
+        # differs — names in COHORT_ZEBRA_OVERLAY_AUTO have per-name backtest
+        # validation (Phase 1+2) for auto-attach; the rest get the overlay
+        # because the plan mandates one on every ZEBRA, though they lack per-name
+        # validation. (Formerly the non-AUTO names got only a "run it yourself"
+        # note — a divergence more permissive than plan.)
         if r["structure"].startswith("zebra"):
-            if r["symbol"] in COHORT_ZEBRA_OVERLAY_AUTO:
-                if overlay_rule is None:
-                    overlay_rule = regime_overlay_rule()
-                ovl = build_zebra_with_overlay_block(r["symbol"], r["opex"], overlay_rule)
-                if ovl["ok"]:
-                    text_parts.append(ovl["text"])
-                    text_parts.append("")
-                    html_parts.append(ovl["html"])
-                else:
-                    text_parts.append(f"  ⚠ {r['symbol']} zebra_overlay: {ovl['error']}")
-            else:
-                discretionary_note = (
-                    f"  ℹ {r['symbol']} long-put overlay: discretionary only "
-                    f"(not in COHORT_ZEBRA_OVERLAY_AUTO). Run "
-                    f"`python3.11 -m scripts.monitor.trade_construction "
-                    f"--symbol {r['symbol']} --expiry {r['opex']} --with-overlay` "
-                    f"to render on demand."
+            if overlay_rule is None:
+                overlay_rule = regime_overlay_rule()
+            validated = r["symbol"] in COHORT_ZEBRA_OVERLAY_AUTO
+            basis = (
+                "backtest-validated auto-attach" if validated else
+                "plan-mandated (every ZEBRA carries a put overlay; this name "
+                "has no per-name backtest validation)"
+            )
+            ovl = build_zebra_with_overlay_block(r["symbol"], r["opex"], overlay_rule)
+            if ovl["ok"]:
+                text_parts.append(ovl["text"])
+                text_parts.append(f"      overlay basis: {basis}")
+                text_parts.append("")
+                html_parts.append(ovl["html"])
+                html_parts.append(
+                    f"<div style='font-size:11px;color:#586069;margin:2px 0 12px 0'>"
+                    f"overlay basis: {basis}</div>"
                 )
-                text_parts.append(discretionary_note)
+            else:
+                text_parts.append(f"  ⚠ {r['symbol']} zebra_overlay ({basis}): {ovl['error']}")
                 text_parts.append("")
                 html_parts.append(
-                    f"<div style='font-size:12px;color:#586069;margin:4px 0 12px 0;"
-                    f"padding:6px 10px;background:#f6f8fa;border-left:3px solid #586069'>"
-                    f"<b>{r['symbol']}</b> long-put overlay: discretionary only "
-                    f"(not in <code>COHORT_ZEBRA_OVERLAY_AUTO</code>). "
-                    f"Run <code>python3.11 -m scripts.monitor.trade_construction "
-                    f"--symbol {r['symbol']} --expiry {r['opex']} --with-overlay</code> "
-                    f"to render on demand.</div>"
+                    f"<div style='font-size:12px;color:#a00;margin:4px 0 12px 0;"
+                    f"padding:6px 10px;background:#fdecea;border-left:3px solid #a00'>"
+                    f"<b>{r['symbol']}</b> zebra_overlay ({basis}): {ovl['error']}</div>"
                 )
 
     # Macro-band concentration check across the rendered candidate set.
