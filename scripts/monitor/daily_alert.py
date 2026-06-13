@@ -871,6 +871,26 @@ def get_schwab_today(conn, symbol: str) -> tuple[float | None, str | None]:
     return None, None
 
 
+def get_schwab_prior(conn, symbol: str, before_date: str) -> tuple[float | None, str | None]:
+    """Most recent live_snapshots close STRICTLY BEFORE before_date — the
+    Schwab-series prior trading day. Used so a daily move can be computed
+    same-source (Schwab today vs Schwab prior) instead of mixing a fresh Schwab
+    'today' with a staler ORATS prior. Returns (None, None) when the symbol has
+    no earlier snapshot (e.g. a freshly-opened position whose prior days were
+    never in the book for the mark daemon to capture)."""
+    try:
+        row = conn.execute(
+            "SELECT current_price, snapshot_date FROM live_snapshots "
+            "WHERE symbol = ? AND snapshot_date < ? ORDER BY snapshot_date DESC LIMIT 1",
+            (symbol, before_date),
+        ).fetchone()
+        if row and row[0]:
+            return float(row[0]), row[1]
+    except Exception:
+        pass
+    return None, None
+
+
 def detect_position_events(positions: pd.DataFrame, thresholds: dict, conn) -> list[str]:
     """Emit per-position events: big moves, FRESH strike breaches, deeper-into-breach moves.
 
@@ -893,6 +913,16 @@ def detect_position_events(positions: pd.DataFrame, thresholds: dict, conn) -> l
             continue
         schwab_px, schwab_dt = get_schwab_today(conn, sym)
         if schwab_px is not None and schwab_dt and schwab_dt > today_dt:
+            # Schwab has a fresher close than ORATS (the normal case at the 16:45
+            # run, since ORATS lags a day and is delivered ~19:00). Use it as
+            # today's price, and take the prior from the SAME Schwab series so the
+            # move is a true 1-day, same-source delta — not Schwab-today vs a
+            # 2-day-old ORATS prior (the bug that mislabeled flat names as big
+            # moves). Fall back to ORATS's most-recent close (today_px here is
+            # still ORATS iloc[-1]) when the symbol has no earlier Schwab snapshot
+            # — a freshly-opened position, e.g. day one of a new trade.
+            schwab_prior_px, _ = get_schwab_prior(conn, sym, schwab_dt)
+            prior_px = schwab_prior_px if schwab_prior_px else today_px
             today_px = schwab_px
             today_dt = schwab_dt
 
