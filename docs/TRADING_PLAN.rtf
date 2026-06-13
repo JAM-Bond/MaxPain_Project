@@ -8,7 +8,7 @@
 \f0\b\fs36 \cf0 MaxPain Project \'97 Formal Trading Plan\
 \pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\qc\pardirnatural\partightenfactor0
 
-\f1\b0\fs24 \cf0 Version 2.3 \'b7 2026-05-02\
+\f1\b0\fs24 \cf0 Version 2.5 \'b7 2026-06-13\
 \pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
 \cf0 \
 
@@ -557,9 +557,19 @@ The methodology generalizes: future Tier 2 (or Tier 1) additions follow the same
 \'95  Phase 2 overlay testing closed 2026-05-14. All managed-exit variants (M1\'96M4) and the three conditional-trigger variants with available data (C1\'96C3) tested and rejected vs HOLD baseline. Detail: project_zebra_overlay_phase2_complete.md.\
 \'95  \b C4 (30Y yield > 5% threshold) \'97 DATA BLOCKED.\b0  No local 30Y parquet; requires FRED / Agent_Project integration. Open question, captured for the post-June-OpEx watchlist.\
 \'95  \b Active-bear deepening qualifier on the Stage 4-5 ITM5 rule \'97 conceptually motivated, N=1 sample.\b0  The split between active-deepening bear (favors ITM5) and troughing/recovery bear (favors OTM10) was empirically clear in 2022-2024 but rests on one regime sample. Formal validation requires another bear regime to confirm; the rule should be applied conservatively in the meantime.\
-\'95  Rolling at DTE\uc0\u8804 21 to the next monthly OpEx for the parent ZEBRA \'97 captures the next gamma cycle? Daily alert surfaces a ROLL CUE for trader discretion but the mechanic is not validated.\
+\'95  Rolling the parent ZEBRA at T-21 \'97 RETIRED 2026-05-14 (it was an untested TastyTrade-canonical cue). The Phase 1+2 backtests showed all five managed-exit variants on the long-put overlay underperformed held-to-OpEx with 0/4 walk-forward splits positive; the late-cycle gamma an early roll would forfeit is exactly what the structure is built to capture. Held-to-OpEx is the validated mechanic for both legs and the daily alert no longer emits a ROLL CUE. (This supersedes the v2.4 Revision Log entry that introduced the T-21 ROLL CUE.) Detail: project_zebra_t21_roll_rule.md.\
 \'95  Walk-forward on the bottom cohort to confirm the directional-bias-required interpretation \'97 if cyclical names show flat-out positive ZEBRA in a future bull regime, the exclusion list may need revisiting.\
 \'95  Whether ZEBRA on bull_put cohort names (e.g., MSFT, TJX, WMT) outperforms running bull_put on those names per-cycle on a capital-adjusted basis. Different sizing baselines make a direct comparison non-trivial.\
+\
+\f0\b\fs26 Anti-ZEBRA (Bearish Synthetic Short) \'97 PROMOTED 2026-05-17\
+\
+\f1\b0\fs24 The anti-ZEBRA is the bearish mirror of the ZEBRA: a three-contract single-underlying put structure that replicates short-stock exposure with negligible time decay. Buy 2\'d7 ITM put at ~70-delta + sell 1\'d7 ATM put at ~50-delta, all on the same expiration. Net debit at entry. Defined risk: max loss = the debit, realized only if spot expires ABOVE the long-put strike. Net entry delta is approximately -0.90 to -1.15, comparable to short stock with a slight gamma kicker. Structurally it is the long-side counterpart to bear_call: a defined-risk debit way to express the bearish regime view instead of (or alongside) a credit spread.\
+\
+Entry gate (H1, identical to bear_call): SPY < 200-DMA AND SPY 252-day IV rank > 0.5. The anti-ZEBRA shares the 75-DTE entry window with the ZEBRA but is the opposite directional bet, so it deploys only when the bear regime is confirmed; in any bull or calm regime its default posture is zero exposure. It is therefore EXEMPT from the C1c "no new ZEBRA at regime stage >= 1" suspension \'97 that rule guards against opening fresh long-delta stock-replacement into a weakening tape, whereas the anti-ZEBRA is the short-delta hedge a weakening tape calls for.\
+\
+Sizing and caps. Capital outlay = 5-10% of book equity per position, same as the ZEBRA. Unlike the ZEBRA, the anti-ZEBRA carries NO long-put overlay to bound its tail, so it keeps a $300 spot cap (MAX_SPOT_ANTI_ZEBRA): reserved for sub-$300 names where the per-contract debit stays within the defined-risk budget. Exit is held-to-OpEx, consistent with the ZEBRA family (the credit-spread T-21 discipline does not apply to debit structures).\
+\
+Promotion basis: docs/ANTI_ZEBRA_PREREG.md (sealed pre-registration) + project_anti_zebra_phase2_findings.md. Cohort: COHORT_ANTI_ZEBRA_TIER1, promoted 2026-05-17 as the 5th active structure. There is no auto-attach overlay cohort for anti-ZEBRA \'97 the long-put overlay study was ZEBRA-specific.\
 \
 \f0\b\fs28 Covered Call (Credit ETFs) \'97 PROMOTED 2026-04-30, DEMOTED 2026-04-30 on live-execution falsification\
 
@@ -845,13 +855,13 @@ A position's max realized loss must not exceed 2x its target win. This is a stru
 \
 The rule excludes structurally bad trades \'97 trades where you risk $4 to make $1, where one loss eats four wins. The 2x cap matches the empirical loss/win ratio implied by managed-exit win rates around 70-80%: a 75% cohort with 1:1 risk/reward breaks even, while 2:1 requires a 67% win rate to break even, which the validated cohorts clear by 5-15 points.\
 \
-spread_score_tracker.py MIN_CREDIT_WIDTH was raised from 0.35 to 0.50 on 2026-04-28 to enforce credit/wing \uc0\u8805 0.50 at scan time. New entries below this threshold do not earn GO verdicts. Existing trades that violate the rule are not retroactively closed.\
+MIN_CREDIT_WIDTH enforces a minimum credit/wing ratio at scan time; entries below the floor do not earn GO verdicts, and existing trades that violate it are not retroactively closed. The floor was raised 0.35 \uc0\u8594 0.50 on 2026-04-28, then \cf0 recalibrated back to 0.35 on 2026-05-05\cf0  after the live win rate held at 73% \'97 the 0.50 floor was excluding tradeable structures without a measured edge gain. The floor is surfaced as a PASS/FAIL annotation on every construction card but is NOT a hard exclusion (trader decision point); raise it back toward 0.50 if the live win rate falls below ~65%. Detail memory: feedback_loss_cap_discipline.md.\
 \
 ZEBRA does not reduce to credit/wing math (debit structure, no fixed wing). MTM-stop discipline for ZEBRA is the next layer; not yet specified.\
 \
 \b Expensive names \'97 verticals only\b0\
 \
-Stocks priced above approximately $100 spot get credit verticals only; ZEBRA, inverted fly, and Jade Lizard structures are reserved for sub-$100 names. Personal-trading budget rule established 2026-04-28, not a backtest finding.\
+Expensive-name discipline (revised 2026-06-09). High-priced single names default to credit verticals, but the structure-specific spot caps have since been split apart: (1) the ZEBRA spot cap was DROPPED entirely \'97 the regime-conditional long-put overlay (validated Phase 1, now auto-attached at every ZEBRA entry) bounds the tail directly, so the old sub-$100/sub-$300 ceiling that proxied for tail risk is no longer needed; ZEBRA is admitted regardless of spot and capital-outlay sizing is trader discretion at construction (the per-position 5\'9610% book-equity outlay rule still governs how many contracts). (2) Inverted fly is capped at $300 spot (BUDGET_CAPS), a proxy for "debit <= ~$2.5k" rather than an actual debit test. (3) Anti-ZEBRA carries the same $300 cap (MAX_SPOT_ANTI_ZEBRA) \'97 it is a debit structure with no overlay to bound its tail. Jade Lizard remains rejected (naked-put leg fails defined-risk). Personal-trading budget rule, not a backtest finding; detail memory feedback_expensive_names_verticals_only.md.\
 \
 ZEBRA on a $200 spot is a $14K-$20K capital outlay per contract; an inverted fly at 10% wings on a $200 spot is a $2K-$3K debit per contract; both are uneconomic on a paper-test or small live book. Verticals scale linearly with strike width regardless of spot, so a $5-wide bull_put on a $200 stock is the same ~$500 max loss as a $5-wide bull_put on a $50 stock.\
 \
@@ -1007,7 +1017,7 @@ The cohort overlap between bull_put and bear_call covers four names (SPY, QQQ, D
 \
 \b Daily regime-state tracking (operational)\b0\
 \
-The 9:20 ET research-cohort capture cron (research_cohort_snapshot.py) is extended in v1.7 to compute and persist the regime stage daily into a new regime_state table in metal_project.db. The cycle qualifier (build window 2026-05-01 to 2026-05-04) reads this state to populate the per-symbol GO/PAUSE/DOWNSIZE grid before each entry day. Operationally, the user does not need to recompute regime state at deployment time \'97 the daily state is available, dated, and auditable.\
+The 9:20 ET research-cohort capture cron (research_cohort_snapshot.py) is extended in v1.7 to compute and persist the regime stage daily into a new regime_state table in the shared maxpain.db. The cycle qualifier (build window 2026-05-01 to 2026-05-04) reads this state to populate the per-symbol GO/PAUSE/DOWNSIZE grid before each entry day. Operationally, the user does not need to recompute regime state at deployment time \'97 the daily state is available, dated, and auditable.\
 \
 \b What this section does NOT do\b0\
 \
@@ -1022,7 +1032,7 @@ The 9:20 ET research-cohort capture cron (research_cohort_snapshot.py) is extend
 \
 \b Cycle qualifier (daily 9:25 ET cron)\b0\
 \
-scripts/qualifier/cycle_qualifier.py runs each weekday morning, reads the current regime_state, computes per-symbol per-structure verdicts (GO, DOWNSIZE, PENDING, SKIP, PAUSE), and persists results to cycle_qualifier_runs in metal_project.db plus a dated parquet. Implements every gate in this plan: bull_put signal gate (contango + VRP > 0), bear_call H1 gate (SPY < 200dma + IVR > 0.5), IF term-inversion gate, ZEBRA 75-DTE entry, covered_call monthly entry (trading day after prior OpEx), earnings-track T-1 / T-3 calendar matching, soft-downsize and hard-pause triggers, and per-name overrides (GOOGL no-IF-gate, SCCO and CNQ T-1 earnings entry).\
+scripts/qualifier/cycle_qualifier.py runs each weekday morning, reads the current regime_state, computes per-symbol per-structure verdicts (GO, DOWNSIZE, PENDING, SKIP, PAUSE), and persists results to cycle_qualifier_runs in maxpain.db plus a dated parquet. Implements every gate in this plan: bull_put signal gate (contango + VRP > 0), bear_call and anti_zebra H1 gate (SPY < 200dma + IVR > 0.5), IF term-inversion gate, ZEBRA 75-DTE entry (skipped at regime stage >= 1), covered_call monthly entry (trading day after prior OpEx), earnings-track T-1 / T-3 calendar matching (with bull_put_earnings now also subject to the hard pause), the budget spot caps (IF + anti_zebra $300), soft-downsize and hard-pause triggers, the bull_put Stage-2 (SPY < 200dma) half-size rule, the below-200dma per-name downsize, the sector / macro-regime / correlated-slot concentration caps, the EV-rank tiebreak, and per-name overrides (GOOGL no-IF-gate, SCCO and CNQ T-1 earnings entry).\
 \
 \b Earnings-in-holding-window gate.\b0  The qualifier also enforces the plan rule "no binary earnings inside the DTE window" \'97 for every non-earnings-bias structure, if any earnings event for the symbol falls in [target, opex] inclusive, the verdict is downgraded to SKIP. Earnings-bias structures (the *_earnings cohorts) bypass the gate by design, since their holding window straddles the earnings event on purpose.\
 \
@@ -1398,6 +1408,40 @@ Caveats:\
 Detail: project_regime_health_monitor.md.\
 \
 
+\f0\b\fs28 Version 2.5 Gate & Sizing Additions\
+\
+\f1\b0\fs24 This section consolidates the gate, sizing, and risk-control rules added since v2.4. All are implemented in scripts/qualifier/cycle_qualifier.py + gate_config.py (verdict and sizing logic) and surfaced in scripts/monitor/ (daily alert and construction cards). The structure sections above remain the canonical description of each structure's mechanics; this is the consolidated rule reference.\
+\
+\f0\b\fs26 Regime-conditional sizing\
+\
+\f1\b0\fs24 \'95  \b Soft-downsize triggers (Stage 1).\b0  Any of: SPY 252-day IVR > 0.7; SPY within 2% of a falling 200-DMA (implemented as a trailing 5-day return < 0, replacing the cruder "already below the line" proxy \'97 the trigger now fires on the approach, as the plan always intended); or term-inverted with VIX > 20. New bull_put entries cut to 50%.\
+\
+\'95  \b Bull_put Stage-2 half-size (C1b).\b0  When SPY closes below its 200-DMA but the full hard pause is not active (term not inverted, or IVR < 0.5), new bull_put entries are DOWNSIZED to 50%. Stage 2 was previously full-size \'97 a divergence more permissive than the plan, now closed.\
+\
+\'95  \b No new ZEBRA at regime stage >= 1 (C1c).\b0  Fresh ZEBRA (long-delta stock-replacement) entries are SKIPPED once the regime leaves calm (any soft-downsize / Stage-2 / H1 condition). anti_zebra is EXEMPT \'97 it is the bearish counterpart a weakening tape calls for.\
+\
+\'95  \b Overlay on every ZEBRA (C1d).\b0  The regime-conditional long-put overlay is surfaced on EVERY ZEBRA GO/DOWNSIZE card, not only the auto-attach cohort. Names in COHORT_ZEBRA_OVERLAY_AUTO are labeled backtest-validated; the rest are labeled plan-mandated (no per-name validation, but the plan requires an overlay on every ZEBRA).\
+\
+\'95  \b Below-200dma per-name downsize.\b0  A bull_put on a name trading more than 10% below its OWN 200-DMA at entry is DOWNSIZED to 50%. This is a per-name adverse-trend flag, distinct from the market-regime Stage-2 rule above. Held-to-expiry stays positive in the deep-ITM cell, so the rule downsizes rather than skips.\
+\
+\f0\b\fs26 Concentration caps (advisory \'97 the user enforces sizing at the broker)\
+\
+\f1\b0\fs24 \'95  \b Sector cap.\b0  Max 2 single names per GICS sector per OpEx; ETFs exempt. Over-cap names become SKIP_CONCENTRATION and appear in a CAPPED OUT list in the alert.\
+\
+\'95  \b Macro-regime cap.\b0  Soft cap of 3 names per regime_primary macro bucket per OpEx (from the per-name macro-sensitivity profile). Over-cap names are DOWNSIZED, not skipped \'97 macro is a risk descriptor, not a selection edge. Orthogonal to the sector cap and runs after it; the invariant SECTOR_CAP < MACRO_CAP keeps the two from double-pruning a single sector.\
+\
+\'95  \b Correlated-slot cap (F3).\b0  Names that are effectively one bet despite distinct tickers \'97 CORRELATED_SLOT_GROUPS, founding case the China ADRs PDD + BABA \'97 share one risk slot: when 2 or more members are actionable in the same OpEx, all are DOWNSIZED to 50% ("size both half, or pick one"). Tighter than the macro cap (it keeps no full-size winner) and runs last.\
+\
+\'95  \b EV-rank tiebreak.\b0  When a cap must choose which names keep full size, the ranking is verdict tier (GO > DOWNSIZE) first, then expected-value reward/risk (within-kind percentile, so ZEBRA and verticals compare fairly), then alphabetical. Fails open to alphabetical when EV cannot be computed.\
+\
+\f0\b\fs26 Risk controls\
+\
+\f1\b0\fs24 \'95  \b Live stop policy.\b0  Operationally (NOT a backtested mechanic \'97 the backtested mid-cycle stop was falsified, see What Doesn't Work), every credit spread is entered with a stop-limit order at 2\'d7 the entry credit, MARK-triggered, GTC. This caps realized loss near 2\'d7 the target win, consistent with the loss-cap discipline. It is an order the USER places manually; the system never sends orders.\
+\
+\'95  \b T-21 time exit.\b0  Credit spreads are closed or rolled at 21 DTE regardless of capture (Window A). This does NOT apply to long-vol (inverted_fly: 50%-only, no time stop) or to debit structures (ZEBRA and anti-ZEBRA: held-to-OpEx).\
+\
+\'95  \b Earnings-track hard pause (C5).\b0  The bull_put_earnings track now also honors the hard-pause regime (SPY < 200dma + term inverted + IVR > 0.5); previously the earnings track bypassed it. bear_call_earnings and inverted_fly_earnings are unaffected \'97 the pause is a bull_put guard.\
+\
 \f0\b\fs28 Revision Log\
 
 \f1\b0\fs24 \
@@ -1554,4 +1598,22 @@ A wide revision built across one session. Eight changes, one new framework secti
 \'95  \b Stale-mark warning in daily_alert (commit 9f1243f).\b0  Companion to the mark daemon. credit_captured_status() now returns a richer dict with status + error fields; the alert emits a "⚠ profit-target check FAILED \'97 no marks found / latest mark Nd old" line whenever the mark feed for any open credit vertical is missing or stale > 2 calendar days. Surfaces broken-pipeline conditions instead of silently no-op'ing.\
 \'95  \b Daily-alert architecture: REGIME HEALTH section added (commit 43c4a19).\b0  New top-level section between the regime header and DTE CHECKPOINTS in the 4:45 PM email body, populated by scripts/monitor/regime_health.py. First production run: 2026-05-04 16:45 ET. The persistence write happens during the same render call \'97 every email fire is also one row per family + per position written to the audit tables, so the dataset accumulates without a separate cron.\
 \'95  Plan version bumped to 2.4.\
+\
+\b v2.5 \'97 2026-06-13 \'97 go-live gate & sizing additions\b0\
+\
+This revision documents the code changes that closed the four C1 plan-vs-code divergences plus the C5 and F3 gate additions from the GO_LIVE_READINESS build list, and brings several stale references current. All changes are implemented and unit / dry-run tested; see docs/GO_LIVE_READINESS.md for the per-item evidence.\
+\
+\'95  \b C1 \'97 four plan-vs-code divergences closed (all had been more permissive than the plan).\b0  (a) soft-downsize trigger now fires on SPY within 2% of a falling 200-DMA via a trailing 5-day-return < 0 test, not the old already-below proxy; (b) bull_put DOWNSIZED to 50% in Stage 2 (SPY < 200-DMA, no full hard pause); (c) new ZEBRA entries SKIPPED at regime stage >= 1 (anti_zebra exempt); (d) the long-put overlay is rendered on every ZEBRA card (backtest-validated vs plan-mandated labels). See the new Version 2.5 Gate & Sizing Additions section.\
+\
+\'95  \b C5 \'97 earnings + budget gates.\b0  bull_put_earnings now honors the hard-pause regime (it had been bypassing it); anti_zebra gained a $300 spot cap (MAX_SPOT_ANTI_ZEBRA) in BUDGET_CAPS and in the budget-gated spot fetch.\
+\
+\'95  \b F3 \'97 correlated-slot cap.\b0  CORRELATED_SLOT_GROUPS (founding case the China ADRs PDD + BABA): when 2 or more members are actionable in the same OpEx they are all DOWNSIZED to 50% ("size both half, or pick one").\
+\
+\'95  \b Anti-ZEBRA section added.\b0  The bearish synthetic-short structure (promoted 2026-05-17, H1-gated, defined-risk, $300 cap) was entirely absent from the plan; now documented as the 5th active structure under Structures & Entry Rules.\
+\
+\'95  \b Stale references corrected.\b0  Title version (was 2.3); MIN_CREDIT_WIDTH text (the 0.50 floor was recalibrated back to 0.35 on 2026-05-05); the expensive-name rule (ZEBRA spot cap dropped 2026-06-09, IF cap is $300, anti_zebra $300 \'97 not the old sub-$100 ceiling); operational metal_project.db references updated to maxpain.db (historical Revision Log entries left as dated record).\
+\
+\'95  \b ZEBRA T-21 roll contradiction resolved.\b0  The pending-investigations bullet that still described a live ROLL CUE was corrected to RETIRED (2026-05-14), superseding the v2.4 log entry that introduced it. Held-to-OpEx is the validated mechanic for both ZEBRA legs.\
+\
+\'95  Plan version bumped to 2.5.\
 }
